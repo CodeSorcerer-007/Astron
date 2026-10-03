@@ -14,6 +14,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.BufferedReader
 import java.io.File
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -47,17 +48,23 @@ class WebDropServer(
     private var sessionToken: String = ""
     private var deviceName: String = ""
 
+    val currentSessionToken: String
+        get() = sessionToken
+
+    val actualPort: Int
+        get() = serverSocket?.localPort ?: DEFAULT_PORT
+
     val webDropUrl: String?
         get() {
             val ip = NetworkUtils.getLocalIpAddress() ?: return null
-            val port = serverSocket?.localPort ?: DEFAULT_PORT
+            val port = actualPort
             return "http://$ip:$port?token=$sessionToken"
         }
 
     val displayUrl: String?
         get() {
             val ip = NetworkUtils.getLocalIpAddress() ?: return null
-            val port = serverSocket?.localPort ?: DEFAULT_PORT
+            val port = actualPort
             return "http://$ip:$port"
         }
 
@@ -68,14 +75,18 @@ class WebDropServer(
         deviceName: String,
         filesToShare: List<TransferItem>,
         port: Int = DEFAULT_PORT,
+        customToken: String? = null,
+        onServerReady: () -> Unit = {},
         onFileUploaded: (uploadedFile: File) -> Unit
     ) = withContext(Dispatchers.IO) {
         if (isRunning) stopServer()
 
         this@WebDropServer.deviceName = deviceName
         this@WebDropServer.sharedFiles = filesToShare
-        this@WebDropServer.sessionToken = CryptoManager.generateSessionToken(8)
-        this@WebDropServer.executor = java.util.concurrent.Executors.newFixedThreadPool(4)
+        this@WebDropServer.sessionToken = customToken ?: CryptoManager.generateSessionToken(8)
+        this@WebDropServer.executor = java.util.concurrent.Executors.newFixedThreadPool(4) { runnable ->
+            Thread(runnable, "WebDrop-Worker").apply { isDaemon = true }
+        }
 
         try {
             serverSocket = ServerSocket().apply {
@@ -83,6 +94,7 @@ class WebDropServer(
                 bind(InetSocketAddress(port))
             }
             isRunning = true
+            onServerReady()
             Log.d(TAG, "WebDrop server running at: $webDropUrl")
 
             while (isRunning) {
@@ -116,14 +128,32 @@ class WebDropServer(
         serverSocket = null
     }
 
+    private fun readLineRaw(inStream: InputStream): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val b = inStream.read()
+            if (b == -1) {
+                return if (sb.isEmpty()) null else sb.toString()
+            }
+            if (b == '\n'.code) {
+                if (sb.isNotEmpty() && sb.last() == '\r') {
+                    sb.setLength(sb.length - 1)
+                }
+                return sb.toString()
+            }
+            sb.append(b.toChar())
+            if (sb.length > 4096) break
+        }
+        return sb.toString()
+    }
+
     private fun handleClientRequest(client: Socket, onFileUploaded: (File) -> Unit) {
         try {
-            client.soTimeout = 30_000
+            client.soTimeout = 5_000
             val inStream = BufferedInputStream(client.getInputStream())
             val outStream = BufferedOutputStream(client.getOutputStream())
 
-            val reader = BufferedReader(InputStreamReader(inStream, Charsets.UTF_8))
-            val requestLine = reader.readLine() ?: return
+            val requestLine = readLineRaw(inStream) ?: return
             val parts = requestLine.split(" ")
             if (parts.size < 2) return
 
@@ -131,15 +161,18 @@ class WebDropServer(
             val rawPath = parts[1]
             val path = URLDecoder.decode(rawPath.substringBefore('?'), "UTF-8")
 
-            // Read HTTP headers
+            // Read HTTP headers (bounded to prevent header flooding)
             val headers = mutableMapOf<String, String>()
-            var line: String?
-            while (!reader.readLine().also { line = it }.isNullOrBlank()) {
-                val currentLine = line ?: break
-                val separator = currentLine.indexOf(':')
+            var headerCount = 0
+            while (true) {
+                val line = readLineRaw(inStream)
+                if (line.isNullOrBlank()) break
+                headerCount++
+                if (headerCount > 100) break
+                val separator = line.indexOf(':')
                 if (separator > 0) {
-                    val key = currentLine.substring(0, separator).trim().lowercase()
-                    val value = currentLine.substring(separator + 1).trim()
+                    val key = line.substring(0, separator).trim().lowercase()
+                    val value = line.substring(separator + 1).trim()
                     headers[key] = value
                 }
             }
@@ -147,6 +180,19 @@ class WebDropServer(
             if (method == "OPTIONS") {
                 send204NoContent(outStream)
                 return
+            }
+
+            // Session token verification
+            if (sessionToken.isNotBlank() && path != "/favicon.ico") {
+                val queryToken = if (rawPath.contains("token=")) {
+                    rawPath.substringAfter("token=").substringBefore('&')
+                } else ""
+                val headerToken = headers["x-session-token"] ?: ""
+                val providedToken = if (queryToken.isNotBlank()) queryToken else headerToken
+                if (providedToken != sessionToken) {
+                    send403(outStream, "Invalid or missing session token")
+                    return
+                }
             }
 
             if (method == "GET") {
@@ -170,13 +216,23 @@ class WebDropServer(
                 }
             } else if (method == "POST" && (path == "/upload" || path == "/api/upload")) {
                 val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
+                if (contentLength <= 0L) {
+                    send400(outStream, "Missing or invalid Content-Length header")
+                    return
+                }
                 if (contentLength > MAX_UPLOAD_BYTES) {
                     send413(outStream, "File exceeds 10 GB limit")
                     return
                 }
 
                 val rawFileName = headers["x-filename"] ?: "upload_${System.currentTimeMillis()}"
-                val fileName = CryptoManager.sanitizeFilename(URLDecoder.decode(rawFileName, "UTF-8"))
+                if (rawFileName.length > 500) {
+                    send400(outStream, "Filename too long")
+                    return
+                }
+                val fileName = CryptoManager.sanitizeFilename(
+                    try { URLDecoder.decode(rawFileName, "UTF-8") } catch (_: Exception) { rawFileName }
+                )
 
                 val targetFile = File(storageManager.getAstronDownloadDirectory(), fileName)
                 targetFile.parentFile?.mkdirs()
@@ -207,7 +263,7 @@ class WebDropServer(
     private fun corsHeaders(): String =
         "Access-Control-Allow-Origin: *\r\n" +
         "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-        "Access-Control-Allow-Headers: X-Filename, Content-Type, Content-Length\r\n"
+        "Access-Control-Allow-Headers: X-Filename, Content-Type, Content-Length, X-Session-Token\r\n"
 
 
     private fun serveWebClientHtml(out: OutputStream) {
@@ -221,7 +277,7 @@ class WebDropServer(
                     <div class="file-name">$safeFileName</div>
                     <div class="file-meta">${NetworkUtils.formatBytes(file.size)} • $safeMime</div>
                 </div>
-                <a href="/download/${file.id}" class="btn-download" download="$safeFileName">Download</a>
+                <a href="/download/${file.id}?token=$sessionToken" class="btn-download" download="$safeFileName">Download</a>
             </div>
             """.trimIndent()
         }
@@ -325,14 +381,21 @@ class WebDropServer(
                     const fill = document.getElementById('progressFill');
                     bar.style.display = 'block';
 
+                    let totalBytes = 0;
+                    Array.from(files).forEach(f => totalBytes += f.size);
+                    const fileLoaded = new Array(files.length).fill(0);
+
                     let uploaded = 0;
                     Array.from(files).forEach((file, index) => {
                         const xhr = new XMLHttpRequest();
-                        xhr.open('POST', '/upload', true);
+                        xhr.open('POST', '/upload?token=' + encodeURIComponent('$sessionToken'), true);
                         xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+                        xhr.setRequestHeader('X-Session-Token', '$sessionToken');
                         xhr.upload.onprogress = (e) => {
-                            if (e.lengthComputable) {
-                                const percent = Math.round((e.loaded / e.total) * 100);
+                            if (e.lengthComputable && totalBytes > 0) {
+                                fileLoaded[index] = e.loaded;
+                                const currentTotal = fileLoaded.reduce((a, b) => a + b, 0);
+                                const percent = Math.min(100, Math.round((currentTotal / totalBytes) * 100));
                                 fill.style.width = percent + '%';
                             }
                         };
@@ -372,11 +435,12 @@ class WebDropServer(
                 send404(out)
                 return
             }
+            val safeName = item.name.replace("\"", "_").replace("\r", "").replace("\n", "")
             val header = "HTTP/1.1 200 OK\r\n" +
                     corsHeaders() +
                     "Content-Type: ${item.mimeType}\r\n" +
                     "Content-Length: ${item.size}\r\n" +
-                    "Content-Disposition: attachment; filename=\"${item.name}\"\r\n" +
+                    "Content-Disposition: attachment; filename=\"$safeName\"\r\n" +
                     "Connection: close\r\n\r\n"
             out.write(header.toByteArray(Charsets.UTF_8))
 
@@ -391,6 +455,28 @@ class WebDropServer(
         } catch (e: Exception) {
             Log.e(TAG, "Error streaming file download", e)
         }
+    }
+
+    private fun send400(out: OutputStream, message: String) {
+        val body = "400 Bad Request: $message"
+        val header = "HTTP/1.1 400 Bad Request\r\n" +
+                corsHeaders() +
+                "Content-Type: text/plain; charset=UTF-8\r\n" +
+                "Content-Length: ${body.length}\r\n" +
+                "Connection: close\r\n\r\n"
+        out.write((header + body).toByteArray(Charsets.UTF_8))
+        out.flush()
+    }
+
+    private fun send403(out: OutputStream, message: String) {
+        val body = "403 Forbidden: $message"
+        val header = "HTTP/1.1 403 Forbidden\r\n" +
+                corsHeaders() +
+                "Content-Type: text/plain; charset=UTF-8\r\n" +
+                "Content-Length: ${body.length}\r\n" +
+                "Connection: close\r\n\r\n"
+        out.write((header + body).toByteArray(Charsets.UTF_8))
+        out.flush()
     }
 
     private fun send204NoContent(out: OutputStream) {

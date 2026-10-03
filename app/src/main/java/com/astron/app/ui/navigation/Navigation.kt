@@ -11,6 +11,12 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import com.astron.app.core.model.TransferItem
 import com.astron.app.ui.screens.history.HistoryScreen
 import com.astron.app.ui.screens.home.HomeScreen
 import com.astron.app.ui.screens.lightdrop.LightDropScreen
@@ -35,7 +41,18 @@ enum class Screen {
 fun MainNavigation(
     initialUris: List<Uri> = emptyList()
 ) {
-    val backStack = remember {
+    val backStack = rememberSaveable(
+        saver = listSaver(
+            save = { it.map { screen -> screen.name } },
+            restore = { names ->
+                mutableStateListOf<Screen>().apply {
+                    addAll(names.mapNotNull { name ->
+                        try { Screen.valueOf(name) } catch (_: Exception) { null }
+                    })
+                }
+            }
+        )
+    ) {
         mutableStateListOf<Screen>().apply {
             if (initialUris.isNotEmpty()) {
                 add(Screen.HOME)
@@ -45,6 +62,8 @@ fun MainNavigation(
             }
         }
     }
+
+    var pendingSendItems by remember { mutableStateOf<List<TransferItem>>(emptyList()) }
 
     val currentScreen = backStack.lastOrNull() ?: Screen.HOME
 
@@ -82,7 +101,10 @@ fun MainNavigation(
             Screen.HOME -> HomeScreen(
                 onNavigateToSend = { navigateTo(Screen.SEND) },
                 onNavigateToReceive = { navigateTo(Screen.RECEIVE) },
-                onNavigateToWebDrop = { navigateTo(Screen.WEBDROP) },
+                onNavigateToWebDrop = {
+                    pendingSendItems = emptyList()
+                    navigateTo(Screen.WEBDROP)
+                },
                 onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
                 onNavigateToHistory = { navigateTo(Screen.HISTORY) },
                 onNavigateToSettings = { navigateTo(Screen.SETTINGS) }
@@ -90,7 +112,10 @@ fun MainNavigation(
             Screen.SEND -> SendScreen(
                 onNavigateBack = { navigateBack() },
                 onTransferStarted = { navigateTo(Screen.TRANSFER) },
-                onNavigateToWebDrop = { navigateTo(Screen.WEBDROP) },
+                onNavigateToWebDrop = { items ->
+                    pendingSendItems = items
+                    navigateTo(Screen.WEBDROP)
+                },
                 onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
                 initialUris = initialUris
             )
@@ -102,7 +127,8 @@ fun MainNavigation(
                 onDismiss = { navigateHome() }
             )
             Screen.WEBDROP -> WebDropScreen(
-                onNavigateBack = { navigateBack() }
+                onNavigateBack = { navigateBack() },
+                sharedFiles = pendingSendItems
             )
             Screen.LIGHTDROP -> LightDropScreen(
                 onNavigateBack = { navigateBack() }

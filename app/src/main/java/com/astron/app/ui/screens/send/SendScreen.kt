@@ -83,12 +83,15 @@ import com.astron.app.ui.theme.TextPrimary
 import com.astron.app.ui.theme.TextSecondary
 import java.net.URLDecoder
 
+import com.astron.app.core.util.PairingUtils
+import com.astron.app.core.model.TransferItem
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SendScreen(
     onNavigateBack: () -> Unit,
     onTransferStarted: () -> Unit,
-    onNavigateToWebDrop: () -> Unit,
+    onNavigateToWebDrop: (List<TransferItem>) -> Unit,
     onNavigateToLightDrop: () -> Unit,
     initialUris: List<Uri> = emptyList(),
     viewModel: SendViewModel = hiltViewModel()
@@ -483,7 +486,7 @@ fun SendScreen(
                     CameraQrScanner(
                         modifier = Modifier.fillMaxSize(),
                         onQrScanned = { qrText ->
-                            val peer = parsePairingQr(qrText)
+                            val peer = PairingUtils.parsePairingQr(qrText)
                             if (peer != null) {
                                 showDirectQrScanner = false
                                 viewModel.sendToPeer(peer) {
@@ -521,40 +524,15 @@ fun SendScreen(
                 },
                 onWebDropSelected = {
                     showRadarSheet = false
-                    onNavigateToWebDrop()
+                    viewModel.stopDiscovery()
+                    onNavigateToWebDrop(selectedItems)
                 },
                 onLightDropSelected = {
                     showRadarSheet = false
+                    viewModel.stopDiscovery()
                     onNavigateToLightDrop()
                 }
             )
         }
-    }
-}
-
-/**
- * Parses an Astron pairing QR string into a PeerDevice.
- */
-private fun parsePairingQr(qrText: String): PeerDevice? {
-    return try {
-        val uri = Uri.parse(qrText)
-        if (uri.scheme == "astron" && uri.host == "pair") {
-            val rawName = uri.getQueryParameter("name") ?: "Astron Receiver"
-            val name = try { URLDecoder.decode(rawName, "UTF-8") } catch (_: Exception) { rawName }
-            val ip = uri.getQueryParameter("ip") ?: return null
-            val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 52737
-            PeerDevice(
-                id = "peer-qr-$ip-$port",
-                name = name,
-                hostAddress = ip,
-                port = port,
-                transportType = TransportType.LOCAL_WIFI,
-                lastSeen = System.currentTimeMillis()
-            )
-        } else {
-            null
-        }
-    } catch (_: Exception) {
-        null
     }
 }

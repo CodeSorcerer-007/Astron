@@ -227,7 +227,13 @@ class TransferForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(contentTitle)
             .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(
+                try {
+                    R.drawable.ic_notification
+                } catch (_: Throwable) {
+                    android.R.drawable.ic_dialog_info
+                }
+            )
             .setContentIntent(pendingOpenApp)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

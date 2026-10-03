@@ -58,6 +58,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -326,6 +328,7 @@ fun HomeScreen(
                 .height(84.dp)
                 .clip(RoundedCornerShape(22.dp))
                 .background(Brush.horizontalGradient(listOf(CosmicCyan, ElectricBlue)))
+                .semantics { contentDescription = "Send files, photos, videos, or apps" }
                 .clickable {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     if (!permissionsState.allPermissionsGranted) {
@@ -394,6 +397,7 @@ fun HomeScreen(
                 .clip(RoundedCornerShape(22.dp))
                 .background(SurfaceLight)
                 .border(1.5.dp, CosmicCyan.copy(alpha = 0.4f), RoundedCornerShape(22.dp))
+                .semantics { contentDescription = "Receive files from nearby devices" }
                 .clickable {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     if (!permissionsState.allPermissionsGranted) {
@@ -544,8 +548,8 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         // LATEST RECEIVED FILE QUICK ACTIONS CARD (Direct OS FileProvider integration)
-        if (latestFile != null && latestFile!!.exists()) {
-            val file = latestFile!!
+        val file = latestFile?.takeIf { it.exists() }
+        if (file != null) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

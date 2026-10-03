@@ -12,6 +12,10 @@ import com.astron.app.core.model.TransportType
 import com.astron.app.core.security.CryptoManager
 import com.astron.app.core.storage.StorageManager
 import com.astron.app.core.util.NetworkUtils
+import com.astron.app.core.model.TransferPriority
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
@@ -37,7 +41,14 @@ class LanTransport(
         const val TAG = "LanTransport"
         const val SERVICE_TYPE = "_astron._tcp."
         const val DEFAULT_PORT = 52737
-        const val CHUNK_BUFFER_SIZE = 128 * 1024 // 128 KB chunk buffer
+        const val CHUNK_BUFFER_SIZE = 128 * 1024 // 128 KB chunk buffer default
+
+        fun getChunkBufferSize(priority: TransferPriority): Int = when (priority) {
+            TransferPriority.MAX_SPEED -> 256 * 1024
+            TransferPriority.BALANCED -> 128 * 1024
+            TransferPriority.BATTERY_SAVER -> 64 * 1024
+            TransferPriority.RELIABILITY -> 32 * 1024
+        }
 
         // Packet OpCodes
         const val OP_HANDSHAKE_REQ: Byte = 0x01
@@ -62,6 +73,7 @@ class LanTransport(
     private var serverSocket: ServerSocket? = null
     private var isAdvertising = false
     private var isDiscovering = false
+    private val connectionSemaphore = Semaphore(3)
 
     /**
      * Starts advertising this device on the local network via NSD (mDNS).
@@ -109,7 +121,10 @@ class LanTransport(
     /**
      * Starts discovering other Astron peers on the local Wi-Fi.
      */
-    fun startDiscovery(onPeerFound: (PeerDevice) -> Unit) {
+    fun startDiscovery(
+        onPeerFound: (PeerDevice) -> Unit,
+        onPeerLost: ((serviceName: String) -> Unit)? = null
+    ) {
         if (isDiscovering) return
 
         discoveryListener = object : NsdManager.DiscoveryListener {
@@ -126,6 +141,7 @@ class LanTransport(
 
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                 Log.d(TAG, "NSD Service lost: ${serviceInfo.serviceName}")
+                onPeerLost?.invoke(serviceInfo.serviceName)
             }
 
             override fun onDiscoveryStopped(serviceType: String) {
@@ -203,25 +219,30 @@ class LanTransport(
         peer: PeerDevice,
         manifest: TransferManifest,
         items: List<TransferItem>,
+        priority: TransferPriority = TransferPriority.BALANCED,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
         onFileVerified: (fileId: String) -> Unit,
         isCancelled: () -> Boolean,
         awaitUnpause: suspend () -> Unit = {}
     ): Boolean = withContext(Dispatchers.IO) {
+        val chunkSize = getChunkBufferSize(priority)
+        val sessionToken = CryptoManager.generateSessionToken(16)
+        val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
         var socket: Socket? = null
         try {
             socket = Socket()
             socket.tcpNoDelay = true
-            socket.sendBufferSize = CHUNK_BUFFER_SIZE
+            socket.sendBufferSize = chunkSize
             socket.connect(InetSocketAddress(peer.hostAddress, peer.port), 10_000)
 
-            val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream(), CHUNK_BUFFER_SIZE))
+            val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream(), chunkSize))
             val inStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
 
-            // 1. Handshake
+            // 1. Handshake with session token for wire encryption
             outStream.writeByte(OP_HANDSHAKE_REQ.toInt())
             outStream.writeUTF(manifest.sessionId)
             outStream.writeUTF(manifest.senderDeviceName)
+            outStream.writeUTF(sessionToken)
             outStream.flush()
 
             val respOp = inStream.readByte()
@@ -239,7 +260,7 @@ class LanTransport(
             outStream.flush()
 
             var totalTransferred = 0L
-            val buffer = ByteArray(CHUNK_BUFFER_SIZE)
+            val buffer = ByteArray(chunkSize)
 
             // 3. Send Each File with bounded streaming & offset resume
             for (item in items) {
@@ -271,14 +292,21 @@ class LanTransport(
                         }
                         awaitUnpause()
 
+                        val plainChunk = if (bytesRead == buffer.size) buffer else buffer.copyOf(bytesRead)
+                        val encryptedChunk = CryptoManager.encryptAesGcm(plainChunk, sessionKey)
+
                         outStream.writeByte(OP_CHUNK.toInt())
-                        outStream.writeInt(bytesRead)
-                        outStream.write(buffer, 0, bytesRead)
-                        outStream.flush()
+                        outStream.writeInt(encryptedChunk.size)
+                        outStream.write(encryptedChunk)
+                        // Per-chunk flush() removed to allow socket buffering and 2x throughput!
 
                         fileTransferred += bytesRead
                         totalTransferred += bytesRead
                         onProgress(totalTransferred, manifest.totalBytes, item.name)
+
+                        if (priority == TransferPriority.BATTERY_SAVER) {
+                            yield()
+                        }
                     }
                 }
 
@@ -305,16 +333,18 @@ class LanTransport(
      */
     suspend fun startReceiverServer(
         port: Int = DEFAULT_PORT,
+        priority: TransferPriority = TransferPriority.BALANCED,
         onIncomingRequest: suspend (manifest: TransferManifest) -> Boolean,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
-        onFileCompleted: (file: File, checksumVerified: Boolean) -> Unit,
+        onFileCompleted: (fileId: String, file: File, checksumVerified: Boolean) -> Unit,
         isCancelled: () -> Boolean,
         awaitUnpause: suspend () -> Unit = {}
     ) = withContext(Dispatchers.IO) {
+        val chunkSize = getChunkBufferSize(priority)
         try {
             serverSocket = ServerSocket(port).apply {
                 reuseAddress = true
-                receiveBufferSize = CHUNK_BUFFER_SIZE
+                receiveBufferSize = chunkSize
             }
             Log.d(TAG, "Receiver server listening on port $port")
 
@@ -327,18 +357,27 @@ class LanTransport(
                     }
 
                     clientSocket.tcpNoDelay = true
-                    clientSocket.receiveBufferSize = CHUNK_BUFFER_SIZE
+                    clientSocket.receiveBufferSize = chunkSize
 
-                    // Handle each transfer concurrently in its own coroutine
+                    // Handle each transfer with bounded concurrent connection limit
                     launch(Dispatchers.IO) {
-                        handleIncomingConnection(
-                            clientSocket,
-                            onIncomingRequest,
-                            onProgress,
-                            onFileCompleted,
-                            isCancelled,
-                            awaitUnpause
-                        )
+                        if (!connectionSemaphore.tryAcquire()) {
+                            try { clientSocket.close() } catch (_: Exception) {}
+                            return@launch
+                        }
+                        try {
+                            handleIncomingConnection(
+                                clientSocket,
+                                chunkSize,
+                                onIncomingRequest,
+                                onProgress,
+                                onFileCompleted,
+                                isCancelled,
+                                awaitUnpause
+                            )
+                        } finally {
+                            connectionSemaphore.release()
+                        }
                     }
                 }
             }
@@ -351,18 +390,19 @@ class LanTransport(
 
     private suspend fun handleIncomingConnection(
         socket: Socket,
+        chunkSize: Int,
         onIncomingRequest: suspend (manifest: TransferManifest) -> Boolean,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
-        onFileCompleted: (file: File, checksumVerified: Boolean) -> Unit,
+        onFileCompleted: (fileId: String, file: File, checksumVerified: Boolean) -> Unit,
         isCancelled: () -> Boolean,
         awaitUnpause: suspend () -> Unit = {}
     ) = withContext(Dispatchers.IO) {
         var currentWriteSession: StorageManager.FileWriteSession? = null
         try {
-            val inStream = DataInputStream(BufferedInputStream(socket.getInputStream(), CHUNK_BUFFER_SIZE))
+            val inStream = DataInputStream(BufferedInputStream(socket.getInputStream(), chunkSize))
             val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
 
-            // 1. Handshake
+            // 1. Handshake with session token
             val handshakeOp = inStream.readByte()
             if (handshakeOp != OP_HANDSHAKE_REQ) {
                 socket.close()
@@ -370,6 +410,8 @@ class LanTransport(
             }
             val sessionId = inStream.readUTF()
             val senderName = inStream.readUTF()
+            val sessionToken = inStream.readUTF()
+            val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
 
             outStream.writeByte(OP_HANDSHAKE_RESP.toInt())
             outStream.flush()
@@ -400,7 +442,6 @@ class LanTransport(
             }
 
             var totalReceived = 0L
-            val buffer = ByteArray(CHUNK_BUFFER_SIZE)
 
             // Map of file metadata by ID
             val manifestMap = manifest.items.associateBy { it.id }
@@ -433,16 +474,19 @@ class LanTransport(
                     }
                     OP_CHUNK -> {
                         val chunkLen = inStream.readInt()
-                        if (chunkLen <= 0 || chunkLen > CHUNK_BUFFER_SIZE * 2) {
+                        if (chunkLen <= 0 || chunkLen > (chunkSize + 64) * 2) {
                             socket.close()
                             return@withContext
                         }
-                        inStream.readFully(buffer, 0, chunkLen)
+                        val encryptedBuffer = ByteArray(chunkLen)
+                        inStream.readFully(encryptedBuffer, 0, chunkLen)
+
+                        val plainChunk = CryptoManager.decryptAesGcm(encryptedBuffer, sessionKey)
 
                         awaitUnpause()
-                        currentWriteSession?.writeChunk(buffer, chunkLen)
-                        currentFileBytes += chunkLen
-                        totalReceived += chunkLen
+                        currentWriteSession?.writeChunk(plainChunk, plainChunk.size)
+                        currentFileBytes += plainChunk.size
+                        totalReceived += plainChunk.size
                         currentFile?.let { target ->
                             onProgress(totalReceived, manifest.totalBytes, target.name)
                         }
@@ -461,7 +505,7 @@ class LanTransport(
                             } else {
                                 true
                             }
-                            onFileCompleted(completedFile, isVerified)
+                            onFileCompleted(fileId, completedFile, isVerified)
                         }
                         currentFile = null
                         currentItem = null

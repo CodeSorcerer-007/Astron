@@ -26,12 +26,24 @@ object CryptoManager {
     }
 
     /**
-     * Derives an AES-256 secret key from an ephemeral session token.
+     * Derives an AES-256 secret key from an ephemeral session token using RFC 5869 HKDF-SHA256.
      */
-    fun deriveKeyFromToken(token: String): SecretKey {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val keyBytes = digest.digest(token.toByteArray(Charsets.UTF_8))
-        return SecretKeySpec(keyBytes, "AES")
+    fun deriveKeyFromToken(
+        token: String,
+        salt: ByteArray = "Astron-Wire-Salt-v1".toByteArray(Charsets.UTF_8),
+        info: String = "Astron-v1-Transport"
+    ): SecretKey {
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        // HKDF-Extract: PRK = HMAC-Hash(salt, IKM)
+        mac.init(SecretKeySpec(salt, "HmacSHA256"))
+        val prk = mac.doFinal(token.toByteArray(Charsets.UTF_8))
+
+        // HKDF-Expand: OKM = HMAC-Hash(PRK, info || 0x01)
+        mac.init(SecretKeySpec(prk, "HmacSHA256"))
+        mac.update(info.toByteArray(Charsets.UTF_8))
+        mac.update(1.toByte())
+        val okm = mac.doFinal() // 32 bytes (256-bit key)
+        return SecretKeySpec(okm, "AES")
     }
 
     /**

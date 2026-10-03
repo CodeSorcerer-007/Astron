@@ -81,13 +81,15 @@ class LanTransportIntegrationTest {
             val inStream = DataInputStream(BufferedInputStream(client.getInputStream()))
             val outStream = DataOutputStream(BufferedOutputStream(client.getOutputStream()))
 
-            // 1. Handshake
+            // 1. Handshake with session token
             val handshakeOp = inStream.readByte()
             assertEquals(LanTransport.OP_HANDSHAKE_REQ, handshakeOp)
             val sessionId = inStream.readUTF()
             val senderName = inStream.readUTF()
+            val sessionToken = inStream.readUTF()
             assertEquals("test-session-99", sessionId)
             assertEquals("Sender-Pixel", senderName)
+            val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
 
             outStream.writeByte(LanTransport.OP_HANDSHAKE_RESP.toInt())
             outStream.flush()
@@ -101,9 +103,8 @@ class LanTransportIntegrationTest {
             val manifest = json.decodeFromString<TransferManifest>(String(manifestBytes, Charsets.UTF_8))
             assertEquals(1, manifest.items.size)
 
-            // 3. Receive File Chunks
+            // 3. Receive File Chunks with AES-GCM decryption
             val writeSession = StorageManager.FileWriteSession(transferredFile)
-            val buffer = ByteArray(16 * 1024)
             var totalReceived = 0L
 
             while (true) {
@@ -117,9 +118,11 @@ class LanTransportIntegrationTest {
                     assertEquals(originalPayload.size.toLong(), fileSize)
                 } else if (op == LanTransport.OP_CHUNK) {
                     val chunkLen = inStream.readInt()
-                    inStream.readFully(buffer, 0, chunkLen)
-                    writeSession.writeChunk(buffer, chunkLen)
-                    totalReceived += chunkLen
+                    val encChunk = ByteArray(chunkLen)
+                    inStream.readFully(encChunk)
+                    val plainChunk = CryptoManager.decryptAesGcm(encChunk, sessionKey)
+                    writeSession.writeChunk(plainChunk, plainChunk.size)
+                    totalReceived += plainChunk.size
                 } else if (op == LanTransport.OP_FILE_END) {
                     val endFileId = inStream.readUTF()
                     assertEquals("item-1", endFileId)
@@ -139,10 +142,14 @@ class LanTransportIntegrationTest {
             val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
             val inStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
 
-            // 1. Handshake
+            val sessionToken = CryptoManager.generateSessionToken(16)
+            val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
+
+            // 1. Handshake with session token
             outStream.writeByte(LanTransport.OP_HANDSHAKE_REQ.toInt())
             outStream.writeUTF("test-session-99")
             outStream.writeUTF("Sender-Pixel")
+            outStream.writeUTF(sessionToken)
             outStream.flush()
 
             val resp = inStream.readByte()
@@ -165,7 +172,7 @@ class LanTransportIntegrationTest {
             outStream.write(manifestBytes)
             outStream.flush()
 
-            // 3. Stream File with Pause and Resume
+            // 3. Stream File with Pause and Resume and AES-GCM chunk encryption
             outStream.writeByte(LanTransport.OP_FILE_START.toInt())
             outStream.writeUTF("item-1")
             outStream.writeUTF("payload.bin")
@@ -187,9 +194,12 @@ class LanTransportIntegrationTest {
                 }
 
                 val currentChunkSize = minOf(chunkSize, originalPayload.size - offset)
+                val plainChunk = originalPayload.copyOfRange(offset, offset + currentChunkSize)
+                val encChunk = CryptoManager.encryptAesGcm(plainChunk, sessionKey)
+
                 outStream.writeByte(LanTransport.OP_CHUNK.toInt())
-                outStream.writeInt(currentChunkSize)
-                outStream.write(originalPayload, offset, currentChunkSize)
+                outStream.writeInt(encChunk.size)
+                outStream.write(encChunk)
                 outStream.flush()
 
                 offset += currentChunkSize
@@ -239,6 +249,7 @@ class LanTransportIntegrationTest {
             inStream.readByte() // OP_HANDSHAKE_REQ
             inStream.readUTF()
             inStream.readUTF()
+            inStream.readUTF() // sessionToken
             outStream.writeByte(LanTransport.OP_HANDSHAKE_RESP.toInt())
             outStream.flush()
 
@@ -259,6 +270,7 @@ class LanTransportIntegrationTest {
             outStream.writeByte(LanTransport.OP_HANDSHAKE_REQ.toInt())
             outStream.writeUTF("session-cancel")
             outStream.writeUTF("Device-Cancel")
+            outStream.writeUTF("dummy-token-9999")
             outStream.flush()
 
             val resp = inStream.readByte()

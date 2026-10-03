@@ -1,4 +1,4 @@
-﻿package com.astron.app
+package com.astron.app
 
 import android.content.Intent
 import android.net.Uri
@@ -12,12 +12,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import com.astron.app.data.PreferencesRepository
 import com.astron.app.ui.navigation.MainNavigation
 import com.astron.app.ui.theme.AstronTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var preferencesRepository: PreferencesRepository
+
+    private val _sharedUris = mutableStateOf<List<Uri>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,15 +38,17 @@ class MainActivity : ComponentActivity() {
             Log.w("MainActivity", "Edge-to-edge initialization warning", t)
         }
 
-        val sharedUris = extractSharedUris(intent)
+        _sharedUris.value = extractSharedUris(intent)
 
         setContent {
-            AstronTheme(darkTheme = false) {
+            val isDark by preferencesRepository.darkModeFlow.collectAsState(initial = false)
+            AstronTheme(darkTheme = isDark) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainNavigation(initialUris = sharedUris)
+                    val uris by remember { _sharedUris }
+                    MainNavigation(initialUris = uris)
                 }
             }
         }
@@ -44,18 +57,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val sharedUris = extractSharedUris(intent)
-        if (sharedUris.isNotEmpty()) {
-            setContent {
-                AstronTheme(darkTheme = false) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
-                    ) {
-                        MainNavigation(initialUris = sharedUris)
-                    }
-                }
-            }
+        val uris = extractSharedUris(intent)
+        if (uris.isNotEmpty()) {
+            _sharedUris.value = uris
         }
     }
 

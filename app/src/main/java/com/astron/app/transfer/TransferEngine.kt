@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.Closeable
+import kotlinx.coroutines.cancel
 import java.io.File
 import java.util.UUID
 
@@ -40,7 +42,7 @@ class TransferEngine(
     val lanTransport: LanTransport = LanTransport(context, storageManager),
     val webDropServer: WebDropServer = WebDropServer(context, storageManager),
     val lightDropManager: LightDropManager = LightDropManager()
-) {
+) : Closeable {
     companion object {
         const val TAG = "TransferEngine"
         private const val SPEED_SMOOTHING_FACTOR = 0.25f // Exponential moving average weight
@@ -49,6 +51,11 @@ class TransferEngine(
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var activeJob: Job? = null
     private var isCancelledFlag = false
+
+    override fun close() {
+        activeJob?.cancel()
+        scope.cancel()
+    }
 
     init {
         scope.launch(Dispatchers.IO) {
@@ -95,14 +102,28 @@ class TransferEngine(
     private var lastSpeedCalcBytes = 0L
     private var smoothedSpeedBps = 0L
 
+    private fun resetSpeedTracking() {
+        lastSpeedCalcTime = System.currentTimeMillis()
+        lastSpeedCalcBytes = 0L
+        smoothedSpeedBps = 0L
+    }
+
     fun startPeerDiscovery() {
         _discoveredPeers.value = emptyList()
-        lanTransport.startDiscovery { peer ->
-            _discoveredPeers.update { current ->
-                val filtered = current.filter { it.id != peer.id }
-                filtered + peer
+        lanTransport.startDiscovery(
+            onPeerFound = { peer ->
+                _discoveredPeers.update { current ->
+                    val filtered = current.filter { it.id != peer.id }
+                    filtered + peer
+                }
+            },
+            onPeerLost = { serviceName ->
+                val base = serviceName.removePrefix("Astron-").substringBeforeLast('-')
+                _discoveredPeers.update { current ->
+                    current.filter { !it.name.equals(base, ignoreCase = true) && !serviceName.contains(it.name) }
+                }
             }
-        }
+        )
     }
 
     fun stopPeerDiscovery() {
@@ -153,10 +174,9 @@ class TransferEngine(
             _currentSession.value = session
             TransferForegroundService.start(context, peer.name)
 
+            val priority = preferencesRepository.transferPriorityFlow.first()
             val startTime = System.currentTimeMillis()
-            lastSpeedCalcTime = startTime
-            lastSpeedCalcBytes = 0L
-            smoothedSpeedBps = 0L
+            resetSpeedTracking()
 
             _currentSession.update { it?.copy(state = SessionState.TRANSFERRING) }
 
@@ -164,6 +184,7 @@ class TransferEngine(
                 peer = peer,
                 manifest = manifest,
                 items = items,
+                priority = priority,
                 onProgress = { transferred, total, activeFileName ->
                     updateThroughputAndProgress(transferred, total, activeFileName, peer.name)
                 },
@@ -244,7 +265,10 @@ class TransferEngine(
                 state = SessionState.ADVERTISING
             )
 
+            val priority = preferencesRepository.transferPriorityFlow.first()
+
             lanTransport.startReceiverServer(
+                priority = priority,
                 onIncomingRequest = { manifest ->
                     _currentSession.update { current ->
                         current?.copy(
@@ -256,11 +280,20 @@ class TransferEngine(
                                     name = it.name,
                                     size = it.size,
                                     mimeType = it.mimeType,
+                                    checksumSha256 = it.checksumSha256,
                                     relativePath = it.relativePath
                                 )
                             },
                             state = SessionState.WAITING_APPROVAL
                         )
+                    }
+
+                    // Check storage space before accepting
+                    val available = storageManager.getAvailableStorageBytes()
+                    if (manifest.totalBytes > available) {
+                        Log.w(TAG, "Not enough storage for incoming transfer: needed ${manifest.totalBytes}, free $available")
+                        _currentSession.update { it?.copy(state = SessionState.FAILED) }
+                        return@startReceiverServer false
                     }
 
                     val autoAccept = preferencesRepository.autoAcceptTrustedFlow.first()
@@ -271,6 +304,7 @@ class TransferEngine(
                     }
 
                     if (approved) {
+                        resetSpeedTracking()
                         _currentSession.update { it?.copy(state = SessionState.TRANSFERRING) }
                         TransferForegroundService.start(context, manifest.senderDeviceName)
                     } else {
@@ -282,11 +316,11 @@ class TransferEngine(
                     val senderName = _currentSession.value?.manifest?.senderDeviceName ?: "Sender"
                     updateThroughputAndProgress(transferred, total, activeFileName, senderName)
                 },
-                onFileCompleted = { completedFile, isVerified ->
+                onFileCompleted = { fileId, completedFile, isVerified ->
                     _currentSession.update { current ->
                         if (current == null) return@update null
                         val updatedItems = current.items.map { item ->
-                            if (item.name == completedFile.name) {
+                            if (item.id == fileId) {
                                 item.copy(status = if (isVerified) ItemStatus.COMPLETED else ItemStatus.FAILED)
                             } else item
                         }

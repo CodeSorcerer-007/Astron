@@ -11,31 +11,38 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.astron.app.core.model.TransferManifest
+import com.astron.app.core.storage.StorageManager
 import com.astron.app.core.util.NetworkUtils
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CosmicCyan
+import com.astron.app.ui.theme.CrimsonError
 import com.astron.app.ui.theme.ElectricBlue
+import com.astron.app.ui.theme.EmeraldVerified
 import com.astron.app.ui.theme.SurfaceLight
 import com.astron.app.ui.theme.SurfaceSubtle
 import com.astron.app.ui.theme.TextPrimary
@@ -47,6 +54,16 @@ fun IncomingTransferDialog(
     onAccept: () -> Unit,
     onDecline: () -> Unit
 ) {
+    val context = LocalContext.current
+    val availableStorageBytes = remember {
+        try {
+            StorageManager(context).getAvailableStorageBytes()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+    val hasInsufficientStorage = availableStorageBytes != null && availableStorageBytes < manifest.totalBytes
+
     Dialog(onDismissRequest = onDecline) {
         Box(
             modifier = Modifier
@@ -61,11 +78,17 @@ fun IncomingTransferDialog(
                     modifier = Modifier
                         .size(56.dp)
                         .clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(CosmicCyan, ElectricBlue))),
+                        .background(
+                            if (hasInsufficientStorage) {
+                                Brush.linearGradient(listOf(CrimsonError, CrimsonError))
+                            } else {
+                                Brush.linearGradient(listOf(CosmicCyan, ElectricBlue))
+                            }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.FileDownload,
+                        imageVector = if (hasInsufficientStorage) Icons.Default.WarningAmber else Icons.Default.FileDownload,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(28.dp)
@@ -110,6 +133,42 @@ fun IncomingTransferDialog(
                     }
                 }
 
+                if (availableStorageBytes != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (hasInsufficientStorage) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CrimsonError.copy(alpha = 0.1f))
+                                .border(1.dp, CrimsonError.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.WarningAmber,
+                                    contentDescription = "Warning",
+                                    tint = CrimsonError,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Low disk space: only ${NetworkUtils.formatBytes(availableStorageBytes)} available",
+                                    color = CrimsonError,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Free storage: ${NetworkUtils.formatBytes(availableStorageBytes)}",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Row(
@@ -135,11 +194,15 @@ fun IncomingTransferDialog(
                             .height(48.dp),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = CosmicCyan,
+                            containerColor = if (hasInsufficientStorage) CrimsonError else CosmicCyan,
                             contentColor = Color.White
                         )
                     ) {
-                        Text("Accept", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(
+                            text = if (hasInsufficientStorage) "Accept Anyway" else "Accept",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
                 }
             }

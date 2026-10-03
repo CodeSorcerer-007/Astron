@@ -37,12 +37,9 @@ class WebDropIntegrationTest {
         }
         val server = WebDropServer(dummyContext, storageManager)
 
-        // Find available port
-        val testPort = 18090
         val serverReady = CompletableDeferred<Unit>()
 
         val serverJob = launch(Dispatchers.IO) {
-            serverReady.complete(Unit)
             server.startServer(
                 deviceName = "Astron-Test-Device",
                 filesToShare = listOf(
@@ -54,22 +51,37 @@ class WebDropIntegrationTest {
                         uriString = "file:///sample.pdf"
                     )
                 ),
-                port = testPort,
+                port = 0,
+                onServerReady = { serverReady.complete(Unit) },
                 onFileUploaded = {}
             )
         }
 
         serverReady.await()
-        delay(150) // Allow ServerSocket.bind() to settle
+        val testPort = server.actualPort
 
         try {
             withTimeout(10_000) {
-                // 1. Test GET /
+                val token = server.currentSessionToken
+
+                // 0. Test unauthorized request without token (Should be 403 Forbidden)
                 Socket("127.0.0.1", testPort).use { socket ->
                     val out = OutputStreamWriter(socket.getOutputStream())
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
 
                     out.write("GET / HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\n\r\n")
+                    out.flush()
+
+                    val statusLine = reader.readLine()
+                    assertTrue("Status without token must be 403 Forbidden: $statusLine", statusLine?.contains("403") == true)
+                }
+
+                // 1. Test GET / with valid token (Should be 200 OK)
+                Socket("127.0.0.1", testPort).use { socket ->
+                    val out = OutputStreamWriter(socket.getOutputStream())
+                    val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+
+                    out.write("GET /?token=$token HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\n\r\n")
                     out.flush()
 
                     val statusLine = reader.readLine()
@@ -86,12 +98,12 @@ class WebDropIntegrationTest {
                     assertTrue("Response must contain sample.pdf", body.contains("sample.pdf"))
                 }
 
-                // 2. Test GET /api/status
+                // 2. Test GET /api/status with token
                 Socket("127.0.0.1", testPort).use { socket ->
                     val out = OutputStreamWriter(socket.getOutputStream())
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
 
-                    out.write("GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\n\r\n")
+                    out.write("GET /api/status?token=$token HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\n\r\n")
                     out.flush()
 
                     val statusLine = reader.readLine()
@@ -128,26 +140,38 @@ class WebDropIntegrationTest {
                     assertTrue("Must include Access-Control-Allow-Methods", body.contains("Access-Control-Allow-Methods"))
                 }
 
-                // 4. Test POST /api/upload with oversized Content-Length (Rejection with 413)
+                // 4. Test POST /api/upload with missing/zero Content-Length (400 Bad Request)
+                Socket("127.0.0.1", testPort).use { socket ->
+                    val out = OutputStreamWriter(socket.getOutputStream())
+                    val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+
+                    out.write("POST /api/upload?token=$token HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\nContent-Length: 0\r\nX-Filename: zero.bin\r\n\r\n")
+                    out.flush()
+
+                    val statusLine = reader.readLine()
+                    assertTrue("Status must be 400 Bad Request: $statusLine", statusLine?.contains("400 Bad Request") == true)
+                }
+
+                // 5. Test POST /api/upload with oversized Content-Length (Rejection with 413)
                 Socket("127.0.0.1", testPort).use { socket ->
                     val out = OutputStreamWriter(socket.getOutputStream())
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
 
                     // 12 GB exceeds MAX_UPLOAD_BYTES (10 GB)
                     val hugeLength = 12L * 1024 * 1024 * 1024
-                    out.write("POST /api/upload HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\nContent-Length: $hugeLength\r\nX-Filename: large_iso.bin\r\n\r\n")
+                    out.write("POST /api/upload?token=$token HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\nContent-Length: $hugeLength\r\nX-Filename: large_iso.bin\r\n\r\n")
                     out.flush()
 
                     val statusLine = reader.readLine()
                     assertTrue("Status must be 413 Payload Too Large: $statusLine", statusLine?.contains("413 Payload Too Large") == true)
                 }
 
-                // 5. Test 404 for unknown path
+                // 5. Test 404 for unknown path (with valid token)
                 Socket("127.0.0.1", testPort).use { socket ->
                     val out = OutputStreamWriter(socket.getOutputStream())
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
 
-                    out.write("GET /unknown/path HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\n\r\n")
+                    out.write("GET /unknown/path?token=$token HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\n\r\n")
                     out.flush()
 
                     val statusLine = reader.readLine()

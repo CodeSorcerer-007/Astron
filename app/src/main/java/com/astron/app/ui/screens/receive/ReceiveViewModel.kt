@@ -86,7 +86,11 @@ class ReceiveViewModel @Inject constructor(
     }
 
     fun stopReceiver() {
+        approvalDeferred?.complete(false)
+        approvalDeferred = null
+        _pendingManifest.value = null
         transferEngine.onIncomingTransferPrompt = null
+        transferEngine.cancelTransfer()
         transferEngine.lanTransport.stopAdvertising()
         transferEngine.lanTransport.stopReceiverServer()
     }

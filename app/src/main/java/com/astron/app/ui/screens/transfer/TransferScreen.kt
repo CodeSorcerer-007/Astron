@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -54,7 +55,10 @@ import com.astron.app.core.util.NetworkUtils
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
+import com.astron.app.ui.theme.CrimsonError
 import com.astron.app.ui.theme.EmeraldVerified
+import com.astron.app.ui.theme.RadiantAmber
+import com.astron.app.ui.theme.SurfaceHover
 import com.astron.app.ui.theme.SurfaceLight
 import com.astron.app.ui.theme.SurfaceSubtle
 import com.astron.app.ui.theme.TextPrimary
@@ -84,6 +88,9 @@ fun TransferScreen(
     val eta = currentSession?.etaSeconds ?: 0L
     val activeFileName = currentSession?.currentItemName ?: ""
     val isCompleted = state == SessionState.COMPLETED
+    val isFailed = state == SessionState.FAILED
+    val isCancelled = state == SessionState.CANCELLED
+    val isTerminal = isCompleted || isFailed || isCancelled
 
     Column(
         modifier = Modifier
@@ -104,10 +111,22 @@ fun TransferScreen(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
-                    .background(if (isCompleted) EmeraldVerified.copy(alpha = 0.12f) else CosmicCyan.copy(alpha = 0.1f))
+                    .background(
+                        when {
+                            isCompleted -> EmeraldVerified.copy(alpha = 0.12f)
+                            isFailed -> CrimsonError.copy(alpha = 0.12f)
+                            isCancelled -> RadiantAmber.copy(alpha = 0.12f)
+                            else -> CosmicCyan.copy(alpha = 0.1f)
+                        }
+                    )
                     .border(
                         1.dp,
-                        if (isCompleted) EmeraldVerified else CosmicCyan.copy(alpha = 0.3f),
+                        when {
+                            isCompleted -> EmeraldVerified
+                            isFailed -> CrimsonError
+                            isCancelled -> RadiantAmber
+                            else -> CosmicCyan.copy(alpha = 0.3f)
+                        },
                         RoundedCornerShape(999.dp)
                     )
                     .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -115,12 +134,19 @@ fun TransferScreen(
                 Text(
                     text = when {
                         isCompleted -> "COMPLETED"
+                        isFailed -> "FAILED"
+                        isCancelled -> "CANCELLED"
                         isPaused -> "PAUSED"
                         state == SessionState.TRANSFERRING -> "TRANSFERRING"
                         state == SessionState.VERIFYING -> "VERIFYING INTEGRITY"
                         else -> state.name
                     },
-                    color = if (isCompleted) EmeraldVerified else CosmicCyan,
+                    color = when {
+                        isCompleted -> EmeraldVerified
+                        isFailed -> CrimsonError
+                        isCancelled -> RadiantAmber
+                        else -> CosmicCyan
+                    },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.5.sp
@@ -130,13 +156,17 @@ fun TransferScreen(
             IconButton(
                 onClick = {
                     if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    viewModel.cancelTransfer()
+                    if (isTerminal) {
+                        viewModel.dismissSession()
+                    } else {
+                        viewModel.cancelTransfer()
+                    }
                     onDismiss()
                 }
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
-                    contentDescription = "Cancel Transfer",
+                    contentDescription = if (isTerminal) "Close" else "Cancel Transfer",
                     tint = TextSecondary
                 )
             }
@@ -156,7 +186,15 @@ fun TransferScreen(
             Box(
                 modifier = Modifier
                     .size(8.dp)
-                    .background(if (isCompleted) EmeraldVerified else CosmicCyan, CircleShape)
+                    .background(
+                        when {
+                            isCompleted -> EmeraldVerified
+                            isFailed -> CrimsonError
+                            isCancelled -> RadiantAmber
+                            else -> CosmicCyan
+                        },
+                        CircleShape
+                    )
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
@@ -181,40 +219,92 @@ fun TransferScreen(
                     .background(SurfaceLight)
                     .border(
                         2.dp,
-                        if (isCompleted) EmeraldVerified else BorderLight,
+                        when {
+                            isCompleted -> EmeraldVerified
+                            isFailed -> CrimsonError
+                            isCancelled -> RadiantAmber
+                            else -> BorderLight
+                        },
                         CircleShape
                     )
             )
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (isCompleted) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Completed",
-                        tint = EmeraldVerified,
-                        modifier = Modifier.size(54.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "100%",
-                        color = TextPrimary,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                } else {
-                    Text(
-                        text = "${(progress * 100).toInt()}%",
-                        color = TextPrimary,
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = (-1).sp
-                    )
-                    Text(
-                        text = "${NetworkUtils.formatBytes(transferredBytes)} / ${NetworkUtils.formatBytes(totalBytes)}",
-                        color = TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) {
+                when {
+                    isCompleted -> {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Completed",
+                            tint = EmeraldVerified,
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "100%",
+                            color = TextPrimary,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    isFailed -> {
+                        Icon(
+                            imageVector = Icons.Default.WarningAmber,
+                            contentDescription = "Transfer Failed",
+                            tint = CrimsonError,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Transfer Failed",
+                            color = CrimsonError,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        val errorDetail = currentSession?.errorMessage
+                        if (!errorDetail.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = errorDetail,
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    isCancelled -> {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Transfer Cancelled",
+                            tint = RadiantAmber,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Cancelled",
+                            color = RadiantAmber,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    else -> {
+                        Text(
+                            text = "${(progress * 100).toInt()}%",
+                            color = TextPrimary,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = (-1).sp
+                        )
+                        Text(
+                            text = "${NetworkUtils.formatBytes(transferredBytes)} / ${NetworkUtils.formatBytes(totalBytes)}",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         }
@@ -222,7 +312,7 @@ fun TransferScreen(
         Spacer(modifier = Modifier.height(28.dp))
 
         // Speed & ETA Telemetry
-        AnimatedVisibility(visible = !isCompleted) {
+        AnimatedVisibility(visible = !isTerminal) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = if (isPaused) "Transfer Paused" else NetworkUtils.formatSpeed(speed),
@@ -248,7 +338,12 @@ fun TransferScreen(
                 .fillMaxWidth()
                 .height(8.dp)
                 .clip(RoundedCornerShape(4.dp)),
-            color = if (isCompleted) EmeraldVerified else CosmicCyan,
+            color = when {
+                isCompleted -> EmeraldVerified
+                isFailed -> CrimsonError
+                isCancelled -> RadiantAmber
+                else -> CosmicCyan
+            },
             trackColor = SurfaceSubtle,
             strokeCap = StrokeCap.Round
         )
@@ -282,7 +377,7 @@ fun TransferScreen(
                     )
                 }
 
-                if (activeFileName.isNotBlank()) {
+                if (activeFileName.isNotBlank() && !isTerminal) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -307,7 +402,7 @@ fun TransferScreen(
         Spacer(modifier = Modifier.weight(1f))
 
         // Action Controls
-        if (isCompleted) {
+        if (isTerminal) {
             Button(
                 onClick = {
                     if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -318,9 +413,16 @@ fun TransferScreen(
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isCompleted) CosmicCyan else SurfaceHover,
+                    contentColor = if (isCompleted) Color.White else TextPrimary
+                )
             ) {
-                Text("Done", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    text = if (isCompleted) "Done" else "Dismiss",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
             }
         } else {
             Row(

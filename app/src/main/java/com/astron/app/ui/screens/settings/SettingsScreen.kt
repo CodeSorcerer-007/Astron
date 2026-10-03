@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.astron.app.BuildConfig
 import com.astron.app.core.model.TransferPriority
 import com.astron.app.core.util.NetworkUtils
 import com.astron.app.ui.theme.BorderLight
@@ -75,6 +76,7 @@ fun SettingsScreen(
     val transferPriority by viewModel.transferPriority.collectAsState()
     val autoAccept by viewModel.autoAcceptTrusted.collectAsState()
     val haptics by viewModel.hapticsEnabled.collectAsState()
+    val darkMode by viewModel.darkMode.collectAsState()
 
     var showNameDialog by remember { mutableStateOf(false) }
     var editNameText by remember { mutableStateOf(deviceName) }
@@ -216,6 +218,34 @@ fun SettingsScreen(
             )
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Dark Mode toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Dark Theme", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("OLED high-contrast dark aesthetic", color = TextSecondary, fontSize = 12.sp)
+                }
+                Switch(
+                    checked = darkMode,
+                    onCheckedChange = { viewModel.setDarkMode(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = CosmicCyan,
+                        uncheckedTrackColor = SurfaceHover
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             // Haptics toggle
             Row(
                 modifier = Modifier
@@ -280,7 +310,7 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Astron v1.0.0", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Astron v${BuildConfig.VERSION_NAME}", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Text("Local-First • Encrypted • Zero Cloud Storage", color = TextSecondary.copy(alpha = 0.6f), fontSize = 11.sp)
             }
 

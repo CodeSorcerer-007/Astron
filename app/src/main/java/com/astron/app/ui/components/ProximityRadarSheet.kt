@@ -1,6 +1,7 @@
 package com.astron.app.ui.components
 
 import android.net.Uri
+import com.astron.app.core.util.PairingUtils
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -8,6 +9,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -187,7 +190,7 @@ fun ProximityRadarSheet(
                 CameraQrScanner(
                     modifier = Modifier.fillMaxWidth().height(260.dp),
                     onQrScanned = { qrText ->
-                        val peer = parsePairingQr(qrText)
+                        val peer = PairingUtils.parsePairingQr(qrText)
                         if (peer != null) {
                             onSelectPeer(peer)
                         }
@@ -253,6 +256,7 @@ fun ProximityRadarSheet(
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(SurfaceSubtle)
                                 .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                                .semantics { contentDescription = "Send files to ${peer.name}" }
                                 .clickable { onSelectPeer(peer) }
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -362,33 +366,5 @@ fun ProximityRadarSheet(
                 }
             }
         }
-    }
-}
-
-/**
- * Parses an Astron pairing QR string into a PeerDevice.
- * Format: astron://pair?name=<name>&ip=<ip>&port=<port>
- */
-private fun parsePairingQr(qrText: String): PeerDevice? {
-    return try {
-        val uri = Uri.parse(qrText)
-        if (uri.scheme == "astron" && uri.host == "pair") {
-            val rawName = uri.getQueryParameter("name") ?: "Astron Receiver"
-            val name = try { URLDecoder.decode(rawName, "UTF-8") } catch (_: Exception) { rawName }
-            val ip = uri.getQueryParameter("ip") ?: return null
-            val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 52737
-            PeerDevice(
-                id = "peer-qr-$ip-$port",
-                name = name,
-                hostAddress = ip,
-                port = port,
-                transportType = TransportType.LOCAL_WIFI,
-                lastSeen = System.currentTimeMillis()
-            )
-        } else {
-            null
-        }
-    } catch (_: Exception) {
-        null
     }
 }
