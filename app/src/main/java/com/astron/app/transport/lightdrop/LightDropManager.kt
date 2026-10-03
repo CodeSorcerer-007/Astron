@@ -1,13 +1,28 @@
 package com.astron.app.transport.lightdrop
 
 import android.graphics.Bitmap
-import com.astron.app.core.security.CryptoManager
 import com.astron.app.core.util.QrCodeGenerator
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.ByteBuffer
-import java.util.Base64
 import java.util.zip.CRC32
+
+internal object Base64Compat {
+    fun encodeToString(bytes: ByteArray): String {
+        return try {
+            java.util.Base64.getEncoder().encodeToString(bytes)
+        } catch (_: Throwable) {
+            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        }
+    }
+
+    fun decode(str: String): ByteArray {
+        return try {
+            java.util.Base64.getDecoder().decode(str)
+        } catch (_: Throwable) {
+            android.util.Base64.decode(str, android.util.Base64.NO_WRAP)
+        }
+    }
+}
 
 data class OpticalFrame(
     val sessionId: Int,
@@ -32,14 +47,50 @@ class LightDropManager {
         const val MAGIC = 0x4153544C // 'ASTL' in ASCII
         const val PROTOCOL_VERSION: Byte = 1
         const val CHUNK_PAYLOAD_SIZE = 256 // 256 bytes per frame for ultra-fast, robust camera recognition
+        const val MAX_OPTICAL_FILE_SIZE = 5L * 1024 * 1024 // 5 MB max for optical transfer
     }
 
     /**
-     * SENDER: Splits a file or byte array into sequenced OpticalFrames with CRC32 checksums.
+     * SENDER: Streams a file into sequenced OpticalFrames with CRC32 checksums without buffering full file into memory.
      */
     fun encodeFileToFrames(file: File, sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt()): List<OpticalFrame> {
-        val bytes = file.readBytes()
-        return encodeBytesToFrames(bytes, sessionId)
+        require(file.length() <= MAX_OPTICAL_FILE_SIZE) {
+            "File size (${file.length()} bytes) exceeds optical transfer limit (${MAX_OPTICAL_FILE_SIZE / (1024 * 1024)} MB)"
+        }
+        val fileSize = file.length()
+        val totalFrames = ((fileSize + CHUNK_PAYLOAD_SIZE - 1) / CHUNK_PAYLOAD_SIZE).toInt().coerceAtLeast(1)
+        val frames = mutableListOf<OpticalFrame>()
+
+        file.inputStream().buffered().use { stream ->
+            val buffer = ByteArray(CHUNK_PAYLOAD_SIZE)
+            var frameIndex = 0
+            var bytesRead: Int
+            while (stream.read(buffer).also { bytesRead = it } != -1) {
+                val chunk = if (bytesRead == buffer.size) buffer.copyOf() else buffer.copyOfRange(0, bytesRead)
+                val crc = CRC32().also { it.update(chunk) }
+                frames.add(
+                    OpticalFrame(
+                        sessionId = sessionId,
+                        frameIndex = frameIndex++,
+                        totalFrames = totalFrames,
+                        payload = chunk,
+                        checksumCrc32 = crc.value
+                    )
+                )
+            }
+        }
+        if (frames.isEmpty()) {
+            frames.add(
+                OpticalFrame(
+                    sessionId = sessionId,
+                    frameIndex = 0,
+                    totalFrames = 1,
+                    payload = ByteArray(0),
+                    checksumCrc32 = 0L
+                )
+            )
+        }
+        return frames
     }
 
     fun encodeBytesToFrames(bytes: ByteArray, sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt()): List<OpticalFrame> {
@@ -72,7 +123,7 @@ class LightDropManager {
      * Format: ASTL:version:sessionId:frameIdx:totalFrames:crc32:base64Payload
      */
     fun serializeFrame(frame: OpticalFrame): String {
-        val b64 = Base64.getEncoder().encodeToString(frame.payload)
+        val b64 = Base64Compat.encodeToString(frame.payload)
         return "ASTL:$PROTOCOL_VERSION:${frame.sessionId}:${frame.frameIndex}:${frame.totalFrames}:${frame.checksumCrc32}:$b64"
     }
 
@@ -102,7 +153,7 @@ class LightDropManager {
             val expectedCrc = parts[5].toLongOrNull() ?: return null
             val b64Payload = parts[6]
 
-            val payload = Base64.getDecoder().decode(b64Payload)
+            val payload = Base64Compat.decode(b64Payload)
 
             // Validate CRC32
             val crc = CRC32()

@@ -13,7 +13,9 @@ import com.astron.app.core.security.CryptoManager
 import com.astron.app.core.storage.StorageManager
 import com.astron.app.core.util.NetworkUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.BufferedInputStream
@@ -49,7 +51,11 @@ class LanTransport(
     }
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
+    private val nsdManager = try {
+        context.getSystemService(Context.NSD_SERVICE) as? NsdManager
+    } catch (_: Throwable) {
+        null
+    }
 
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
@@ -93,10 +99,9 @@ class LanTransport(
     }
 
     fun stopAdvertising() {
-        if (!isAdvertising) return
         try {
             registrationListener?.let { nsdManager?.unregisterService(it) }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         registrationListener = null
         isAdvertising = false
     }
@@ -184,10 +189,9 @@ class LanTransport(
     }
 
     fun stopDiscovery() {
-        if (!isDiscovering) return
         try {
             discoveryListener?.let { nsdManager?.stopServiceDiscovery(it) }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         discoveryListener = null
         isDiscovering = false
     }
@@ -201,7 +205,8 @@ class LanTransport(
         items: List<TransferItem>,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
         onFileVerified: (fileId: String) -> Unit,
-        isCancelled: () -> Boolean
+        isCancelled: () -> Boolean,
+        awaitUnpause: suspend () -> Unit = {}
     ): Boolean = withContext(Dispatchers.IO) {
         var socket: Socket? = null
         try {
@@ -264,6 +269,7 @@ class LanTransport(
                             outStream.flush()
                             return@withContext false
                         }
+                        awaitUnpause()
 
                         outStream.writeByte(OP_CHUNK.toInt())
                         outStream.writeInt(bytesRead)
@@ -302,7 +308,8 @@ class LanTransport(
         onIncomingRequest: suspend (manifest: TransferManifest) -> Boolean,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
         onFileCompleted: (file: File, checksumVerified: Boolean) -> Unit,
-        isCancelled: () -> Boolean
+        isCancelled: () -> Boolean,
+        awaitUnpause: suspend () -> Unit = {}
     ) = withContext(Dispatchers.IO) {
         try {
             serverSocket = ServerSocket(port).apply {
@@ -311,24 +318,29 @@ class LanTransport(
             }
             Log.d(TAG, "Receiver server listening on port $port")
 
-            while (isActive && !isCancelled()) {
-                val clientSocket = try {
-                    serverSocket?.accept() ?: break
-                } catch (_: Exception) {
-                    break
+            coroutineScope {
+                while (isActive && !isCancelled()) {
+                    val clientSocket = try {
+                        serverSocket?.accept() ?: break
+                    } catch (_: Exception) {
+                        break
+                    }
+
+                    clientSocket.tcpNoDelay = true
+                    clientSocket.receiveBufferSize = CHUNK_BUFFER_SIZE
+
+                    // Handle each transfer concurrently in its own coroutine
+                    launch(Dispatchers.IO) {
+                        handleIncomingConnection(
+                            clientSocket,
+                            onIncomingRequest,
+                            onProgress,
+                            onFileCompleted,
+                            isCancelled,
+                            awaitUnpause
+                        )
+                    }
                 }
-
-                clientSocket.tcpNoDelay = true
-                clientSocket.receiveBufferSize = CHUNK_BUFFER_SIZE
-
-                // Handle transfer in coroutine
-                handleIncomingConnection(
-                    clientSocket,
-                    onIncomingRequest,
-                    onProgress,
-                    onFileCompleted,
-                    isCancelled
-                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "Receiver server exception", e)
@@ -342,8 +354,10 @@ class LanTransport(
         onIncomingRequest: suspend (manifest: TransferManifest) -> Boolean,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
         onFileCompleted: (file: File, checksumVerified: Boolean) -> Unit,
-        isCancelled: () -> Boolean
+        isCancelled: () -> Boolean,
+        awaitUnpause: suspend () -> Unit = {}
     ) = withContext(Dispatchers.IO) {
+        var currentWriteSession: StorageManager.FileWriteSession? = null
         try {
             val inStream = DataInputStream(BufferedInputStream(socket.getInputStream(), CHUNK_BUFFER_SIZE))
             val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
@@ -367,6 +381,10 @@ class LanTransport(
                 return@withContext
             }
             val manifestLen = inStream.readInt()
+            if (manifestLen <= 0 || manifestLen > 10 * 1024 * 1024) {
+                socket.close()
+                return@withContext
+            }
             val manifestBytes = ByteArray(manifestLen)
             inStream.readFully(manifestBytes)
 
@@ -408,20 +426,32 @@ class LanTransport(
                             com.astron.app.core.model.DuplicateAction.KEEP_BOTH
                         )
                         currentFileBytes = 0L
+                        currentWriteSession?.close()
+                        currentFile?.let { target ->
+                            currentWriteSession = storageManager.openWriteSession(target, 0L)
+                        }
                     }
                     OP_CHUNK -> {
                         val chunkLen = inStream.readInt()
+                        if (chunkLen <= 0 || chunkLen > CHUNK_BUFFER_SIZE * 2) {
+                            socket.close()
+                            return@withContext
+                        }
                         inStream.readFully(buffer, 0, chunkLen)
 
+                        awaitUnpause()
+                        currentWriteSession?.writeChunk(buffer, chunkLen)
+                        currentFileBytes += chunkLen
+                        totalReceived += chunkLen
                         currentFile?.let { target ->
-                            storageManager.writeChunkAtOffset(target, currentFileBytes, buffer, chunkLen)
-                            currentFileBytes += chunkLen
-                            totalReceived += chunkLen
                             onProgress(totalReceived, manifest.totalBytes, target.name)
                         }
                     }
                     OP_FILE_END -> {
                         val fileId = inStream.readUTF()
+                        currentWriteSession?.close()
+                        currentWriteSession = null
+
                         currentFile?.let { completedFile ->
                             // Checksum verification
                             val expectedSha = currentItem?.checksumSha256
@@ -447,6 +477,7 @@ class LanTransport(
         } catch (e: Exception) {
             Log.e(TAG, "Error handling incoming LAN transfer", e)
         } finally {
+            try { currentWriteSession?.close() } catch (_: Exception) {}
             try { socket.close() } catch (_: Exception) {}
         }
     }

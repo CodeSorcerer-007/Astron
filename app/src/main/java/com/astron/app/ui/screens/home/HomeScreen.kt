@@ -1,5 +1,9 @@
 package com.astron.app.ui.screens.home
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,50 +12,87 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NearMe
-import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiTethering
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.astron.app.AstronApplication
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.astron.app.core.permissions.PermissionManager
+import com.astron.app.core.util.AppFileManager
 import com.astron.app.core.util.NetworkUtils
+import com.astron.app.ui.components.AppPickerSheet
 import com.astron.app.ui.components.AstronLogoHeader
+import com.astron.app.ui.theme.BorderLight
+import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
+import com.astron.app.ui.theme.CrimsonError
 import com.astron.app.ui.theme.ElectricBlue
-import com.astron.app.ui.theme.SpaceBlack
-import com.astron.app.ui.theme.SpaceBorder
-import com.astron.app.ui.theme.SpaceDark
-import com.astron.app.ui.theme.SpaceSurface
+import com.astron.app.ui.theme.EmeraldVerified
 import com.astron.app.ui.theme.StellarViolet
+import com.astron.app.ui.theme.SurfaceHover
+import com.astron.app.ui.theme.SurfaceLight
+import com.astron.app.ui.theme.SurfaceSubtle
 import com.astron.app.ui.theme.TextPrimary
 import com.astron.app.ui.theme.TextSecondary
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun HomeScreen(
     onNavigateToSend: () -> Unit,
@@ -59,27 +100,49 @@ fun HomeScreen(
     onNavigateToWebDrop: () -> Unit,
     onNavigateToLightDrop: () -> Unit,
     onNavigateToHistory: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    viewModel: HomeViewModel = hiltViewModel()
 ) {
-    val prefsRepo = AstronApplication.instance.preferencesRepository
-    val historyRepo = AstronApplication.instance.historyRepository
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
 
-    val deviceName by prefsRepo.deviceNameFlow.collectAsState(initial = NetworkUtils.getDefaultDeviceName())
-    val historyList by historyRepo.historyFlow.collectAsState(initial = emptyList())
-    val localIp = NetworkUtils.getLocalIpAddress()
+    val deviceName by viewModel.deviceName.collectAsState()
+    val historyList by viewModel.recentTransfers.collectAsState()
+    val localIp by viewModel.localIpAddress.collectAsState()
+    val storageInfo by viewModel.storageInfo.collectAsState()
+    val latestFile by viewModel.latestReceivedFile.collectAsState()
+
+    var showAppPickerSheet by remember { mutableStateOf(false) }
+
+    val permissionsState = rememberMultiplePermissionsState(
+        permissions = PermissionManager.getRequiredPermissions()
+    )
+    var showPermissionSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshState()
+    }
+
+    val totalStorage = storageInfo.first
+    val freeStorage = storageInfo.second
+    val usedStorage = (totalStorage - freeStorage).coerceAtLeast(0L)
+    val usedStorageRatio = if (totalStorage > 0) (usedStorage.toFloat() / totalStorage).coerceIn(0f, 1f) else 0f
+    val animatedStorageProgress by animateFloatAsState(targetValue = usedStorageRatio, label = "storageProgress")
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpaceBlack)
-            .padding(horizontal = 24.dp, vertical = 16.dp),
+            .background(CanvasLight)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Top Bar: Device Name Chip & Action Icons
+        // TOP BAR: Device Identity Pill & Quick System Actions
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 16.dp),
+                .padding(top = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -87,36 +150,55 @@ fun HomeScreen(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
-                    .background(SpaceSurface)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(999.dp))
-                    .clickable { onNavigateToSettings() }
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(999.dp))
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onNavigateToSettings()
+                    }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
                         .size(8.dp)
-                        .background(if (localIp != null) CosmicCyan else TextSecondary, CircleShape)
+                        .background(if (localIp != null) EmeraldVerified else CrimsonError, CircleShape)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = deviceName,
                     color = TextPrimary,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            // History & Settings Icons
-            Row {
-                IconButton(onClick = onNavigateToHistory) {
+            // Action Icons: Downloads folder, Transfer History, Settings
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    AppFileManager.openDownloadsFolder(context)
+                }) {
                     Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = "History",
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = "Downloads Folder",
                         tint = TextSecondary
                     )
                 }
-                IconButton(onClick = onNavigateToSettings) {
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onNavigateToHistory()
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "Transfer History",
+                        tint = TextSecondary
+                    )
+                }
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onNavigateToSettings()
+                }) {
                     Icon(
                         imageVector = Icons.Default.Settings,
                         contentDescription = "Settings",
@@ -126,22 +208,133 @@ fun HomeScreen(
             }
         }
 
+        // Wi-Fi Disconnected Warning Banner if no local IP
+        if (localIp == null) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(CrimsonError.copy(alpha = 0.08f))
+                    .border(1.dp, CrimsonError.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                    .clickable { viewModel.refreshState() }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.WarningAmber,
+                    contentDescription = "Wi-Fi Warning",
+                    tint = CrimsonError,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "No Wi-Fi detected. Connect to Wi-Fi or use LightDrop (Optical).",
+                    color = CrimsonError,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Astron Logo Hero
+        AstronLogoHeader(compact = true)
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // REAL STORAGE & NETWORK TELEMETRY CARD
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(SurfaceLight)
+                .border(1.dp, BorderLight, RoundedCornerShape(18.dp))
+                .padding(16.dp)
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Storage,
+                            contentDescription = "Storage",
+                            tint = CosmicCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Internal Storage",
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = "${NetworkUtils.formatBytes(freeStorage)} free",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LinearProgressIndicator(
+                    progress = { animatedStorageProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = CosmicCyan,
+                    trackColor = SurfaceSubtle,
+                    strokeCap = StrokeCap.Round
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${NetworkUtils.formatBytes(usedStorage)} of ${NetworkUtils.formatBytes(totalStorage)} used",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = "IP: ${localIp ?: "Offline"}",
+                        color = if (localIp != null) CosmicCyan else TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Astron Logo with Orbital Rings
-        AstronLogoHeader()
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // PRIMARY ACTION 1: SEND (Glowing Gradient Hero Button)
+        // PRIMARY ACTION 1: SEND (Swiss Cobalt Gradient Hero Card)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(84.dp)
                 .clip(RoundedCornerShape(22.dp))
                 .background(Brush.horizontalGradient(listOf(CosmicCyan, ElectricBlue)))
-                .clickable { onNavigateToSend() }
-                .padding(horizontal = 24.dp),
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (!permissionsState.allPermissionsGranted) {
+                        showPermissionSheet = true
+                    } else {
+                        onNavigateToSend()
+                    }
+                }
+                .padding(horizontal = 22.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             Row(
@@ -154,13 +347,13 @@ fun HomeScreen(
                         modifier = Modifier
                             .size(46.dp)
                             .clip(CircleShape)
-                            .background(SpaceBlack.copy(alpha = 0.2f)),
+                            .background(Color.White.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.NearMe,
-                            contentDescription = null,
-                            tint = SpaceBlack,
+                            contentDescription = "Send",
+                            tint = Color.White,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -168,14 +361,14 @@ fun HomeScreen(
                     Column {
                         Text(
                             text = "SEND",
-                            color = SpaceBlack,
+                            color = Color.White,
                             fontSize = 20.sp,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Choose files to share",
-                            color = SpaceBlack.copy(alpha = 0.75f),
+                            text = "Photos, videos, files & APKs",
+                            color = Color.White.copy(alpha = 0.85f),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -183,26 +376,33 @@ fun HomeScreen(
                 }
 
                 Icon(
-                    imageVector = Icons.Default.ArrowForward,
-                    contentDescription = null,
-                    tint = SpaceBlack,
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "Send files",
+                    tint = Color.White,
                     modifier = Modifier.size(22.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // PRIMARY ACTION 2: RECEIVE (Deep Surface with Orbital Rings Icon)
+        // PRIMARY ACTION 2: RECEIVE (Clean White Surface with Cobalt Border)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(84.dp)
                 .clip(RoundedCornerShape(22.dp))
-                .background(SpaceDark)
-                .border(1.dp, CosmicCyan.copy(alpha = 0.35f), RoundedCornerShape(22.dp))
-                .clickable { onNavigateToReceive() }
-                .padding(horizontal = 24.dp),
+                .background(SurfaceLight)
+                .border(1.5.dp, CosmicCyan.copy(alpha = 0.4f), RoundedCornerShape(22.dp))
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (!permissionsState.allPermissionsGranted) {
+                        showPermissionSheet = true
+                    } else {
+                        onNavigateToReceive()
+                    }
+                }
+                .padding(horizontal = 22.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             Row(
@@ -215,12 +415,12 @@ fun HomeScreen(
                         modifier = Modifier
                             .size(46.dp)
                             .clip(CircleShape)
-                            .background(CosmicCyan.copy(alpha = 0.12f)),
+                            .background(CosmicCyan.copy(alpha = 0.1f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.WifiTethering,
-                            contentDescription = null,
+                            contentDescription = "Receive",
                             tint = CosmicCyan,
                             modifier = Modifier.size(24.dp)
                         )
@@ -231,11 +431,11 @@ fun HomeScreen(
                             text = "RECEIVE",
                             color = TextPrimary,
                             fontSize = 20.sp,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Make visible to nearby senders",
+                            text = "Make visible & show pairing QR",
                             color = TextSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
@@ -244,51 +444,72 @@ fun HomeScreen(
                 }
 
                 Icon(
-                    imageVector = Icons.Default.ArrowForward,
-                    contentDescription = null,
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "Receive files",
                     tint = CosmicCyan,
                     modifier = Modifier.size(22.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // QUICK ALTERNATIVE MODES: Web Drop & Light Drop
+        // QUICK SUITE: Installed Apps, Web Drop, Light Drop
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Installed Apps (APK) Quick Launcher
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showAppPickerSheet = true
+                    }
+                    .padding(vertical = 12.dp, horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Android,
+                    contentDescription = "Share Apps",
+                    tint = StellarViolet,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text("Apps (APK)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Extract APK", color = TextSecondary, fontSize = 10.sp)
+                }
+            }
+
             // Web Drop Pill
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(SpaceSurface)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
-                    .clickable { onNavigateToWebDrop() }
-                    .padding(vertical = 14.dp, horizontal = 14.dp),
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onNavigateToWebDrop()
+                    }
+                    .padding(vertical = 12.dp, horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.Wifi,
-                    contentDescription = null,
+                    contentDescription = "Web Drop",
                     tint = CosmicCyan,
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text(
-                        text = "Web Drop",
-                        color = TextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Share without App",
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
+                    Text("Web Drop", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Browser Share", color = TextSecondary, fontSize = 10.sp)
                 }
             }
 
@@ -297,36 +518,128 @@ fun HomeScreen(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(SpaceSurface)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
-                    .clickable { onNavigateToLightDrop() }
-                    .padding(vertical = 14.dp, horizontal = 14.dp),
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onNavigateToLightDrop()
+                    }
+                    .padding(vertical = 12.dp, horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.FlashOn,
-                    contentDescription = null,
-                    tint = StellarViolet,
+                    contentDescription = "Light Drop",
+                    tint = ElectricBlue,
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text(
-                        text = "Light Drop",
-                        color = TextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Zero-Radio Mode",
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
+                    Text("Light Drop", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Optical Air-Gap", color = TextSecondary, fontSize = 10.sp)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // LATEST RECEIVED FILE QUICK ACTIONS CARD (Direct OS FileProvider integration)
+        if (latestFile != null && latestFile!!.exists()) {
+            val file = latestFile!!
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(18.dp))
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "LATEST RECEIVED FILE",
+                            color = CosmicCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = NetworkUtils.formatBytes(file.length()),
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(CosmicCyan.copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                                contentDescription = null,
+                                tint = CosmicCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Text(
+                            text = file.name,
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = { AppFileManager.openFile(context, file) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open", modifier = Modifier.size(16.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Open", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = { AppFileManager.shareFile(context, file) },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderLight)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(16.dp), tint = TextPrimary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Share", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // RECENT TRANSFERS FEED
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -337,14 +650,13 @@ fun HomeScreen(
             ) {
                 Text(
                     text = "Recent Transfers",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 if (historyList.isNotEmpty()) {
                     Text(
-                        text = "View all",
+                        text = "View all (${historyList.size})",
                         color = CosmicCyan,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -360,14 +672,14 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(SpaceDark)
-                        .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
+                        .background(SurfaceLight)
+                        .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                         .padding(vertical = 20.dp, horizontal = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No recent transfers — your completed transfers will appear here.",
-                        color = TextSecondary.copy(alpha = 0.7f),
+                        text = "No recent transfers — completed transfers will appear here.",
+                        color = TextSecondary,
                         fontSize = 12.sp
                     )
                 }
@@ -377,8 +689,8 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(SpaceDark)
-                        .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
+                        .background(SurfaceLight)
+                        .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                         .clickable { onNavigateToHistory() }
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -401,7 +713,7 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(CosmicCyan.copy(alpha = 0.15f))
+                            .background(CosmicCyan.copy(alpha = 0.12f))
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
@@ -414,6 +726,92 @@ fun HomeScreen(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+    }
+
+    // App Picker Sheet from Home
+    if (showAppPickerSheet) {
+        AppPickerSheet(
+            onDismiss = { showAppPickerSheet = false },
+            onAppsSelected = { chosenApps ->
+                showAppPickerSheet = false
+                onNavigateToSend()
+            }
+        )
+    }
+
+    // Permission Dialog Bottom Sheet
+    if (showPermissionSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPermissionSheet = false },
+            containerColor = SurfaceLight,
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(CosmicCyan.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = "Security",
+                        tint = CosmicCyan,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Permissions Required",
+                    color = TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Astron requires camera, local network, and notification permissions to stream optical QR codes and discover nearby devices.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = {
+                        showPermissionSheet = false
+                        permissionsState.launchMultiplePermissionRequest()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Grant Permissions", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        }
+                        try { context.startActivity(intent) } catch (_: Throwable) {}
+                        showPermissionSheet = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Open App Settings", fontSize = 13.sp)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
     }
 }

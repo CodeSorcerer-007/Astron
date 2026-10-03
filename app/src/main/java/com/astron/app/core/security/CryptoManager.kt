@@ -70,7 +70,7 @@ object CryptoManager {
 
     /**
      * Computes the SHA-256 checksum of an InputStream in a streaming fashion.
-     * Memory bounded to 64KB buffer.
+     * Memory bounded to 64KB buffer. Stream is cleanly closed to prevent file descriptor leaks.
      */
     fun computeSha256(inputStream: InputStream, onProgress: ((Long) -> Unit)? = null): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -78,10 +78,12 @@ object CryptoManager {
         var bytesRead: Int
         var totalRead = 0L
 
-        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-            digest.update(buffer, 0, bytesRead)
-            totalRead += bytesRead
-            onProgress?.invoke(totalRead)
+        inputStream.use { stream ->
+            while (stream.read(buffer).also { bytesRead = it } != -1) {
+                digest.update(buffer, 0, bytesRead)
+                totalRead += bytesRead
+                onProgress?.invoke(totalRead)
+            }
         }
 
         return digest.digest().joinToString("") { "%02x".format(it) }

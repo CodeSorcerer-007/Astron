@@ -1,42 +1,22 @@
-package com.astron.app
+﻿package com.astron.app
 
 import android.app.Application
-import com.astron.app.core.storage.StorageManager
-import com.astron.app.data.HistoryRepository
-import com.astron.app.data.PreferencesRepository
-import com.astron.app.transfer.TransferEngine
+import android.util.Log
+import dagger.hilt.android.HiltAndroidApp
 
+@HiltAndroidApp
 class AstronApplication : Application() {
-
-    lateinit var storageManager: StorageManager
-        private set
-
-    lateinit var preferencesRepository: PreferencesRepository
-        private set
-
-    lateinit var historyRepository: HistoryRepository
-        private set
-
-    lateinit var transferEngine: TransferEngine
-        private set
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
 
-        storageManager = StorageManager(this)
-        preferencesRepository = PreferencesRepository(this)
-        historyRepository = HistoryRepository(this)
-        transferEngine = TransferEngine(
-            context = this,
-            storageManager = storageManager,
-            preferencesRepository = preferencesRepository,
-            historyRepository = historyRepository
-        )
-    }
-
-    companion object {
-        lateinit var instance: AstronApplication
-            private set
+        // Global crash guard to prevent hard app crashes and ensure structured crash diagnostics
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                Log.e("AstronCrash", "Uncaught fatal exception on thread ${thread.name}: ${throwable.message}", throwable)
+            } catch (_: Throwable) {}
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
     }
 }

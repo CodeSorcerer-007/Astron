@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,12 +33,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.astron.app.core.model.TransferManifest
 import com.astron.app.core.util.NetworkUtils
+import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CosmicCyan
 import com.astron.app.ui.theme.ElectricBlue
-import com.astron.app.ui.theme.SpaceBlack
-import com.astron.app.ui.theme.SpaceBorder
-import com.astron.app.ui.theme.SpaceDark
-import com.astron.app.ui.theme.SpaceSurface
+import com.astron.app.ui.theme.SurfaceLight
+import com.astron.app.ui.theme.SurfaceSubtle
 import com.astron.app.ui.theme.TextPrimary
 import com.astron.app.ui.theme.TextSecondary
 
@@ -54,8 +52,8 @@ fun IncomingTransferDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(SpaceDark)
-                .border(1.dp, SpaceBorder, RoundedCornerShape(24.dp))
+                .background(SurfaceLight)
+                .border(1.dp, BorderLight, RoundedCornerShape(24.dp))
                 .padding(24.dp)
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -69,7 +67,7 @@ fun IncomingTransferDialog(
                     Icon(
                         imageVector = Icons.Default.FileDownload,
                         contentDescription = null,
-                        tint = SpaceBlack,
+                        tint = Color.White,
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -84,13 +82,14 @@ fun IncomingTransferDialog(
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(SpaceSurface)
+                        .background(SurfaceSubtle)
+                        .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -98,7 +97,7 @@ fun IncomingTransferDialog(
                         Text(
                             text = "${manifest.totalFiles} files",
                             color = CosmicCyan,
-                            fontSize = 18.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
@@ -123,6 +122,7 @@ fun IncomingTransferDialog(
                             .weight(1f)
                             .height(48.dp),
                         shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderLight),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
                     ) {
                         Text("Decline", fontWeight = FontWeight.SemiBold)
@@ -136,10 +136,10 @@ fun IncomingTransferDialog(
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = CosmicCyan,
-                            contentColor = SpaceBlack
+                            contentColor = Color.White
                         )
                     ) {
-                        Text("Accept", fontWeight = FontWeight.Bold)
+                        Text("Accept", fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }

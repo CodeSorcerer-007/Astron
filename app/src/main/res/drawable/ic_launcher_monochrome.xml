@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Monochrome Orbital glow arc -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M26,62 C34,44 74,40 82,54 C88,64 70,72 54,72 C38,72 24,66 26,62 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+    <!-- Stellar 'A' Left Beam -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,26 L32,78"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+    <!-- Stellar 'A' Right Beam -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,26 L76,78"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+    <!-- Central Beam Crossbar -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M40,58 L68,58"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
+    <!-- Apex Core Beacon -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,22 C56.2,22 58,23.8 58,26 C58,28.2 56.2,30 54,30 C51.8,30 50,28.2 50,26 C50,23.8 51.8,22 54,22 Z" />
+</vector>

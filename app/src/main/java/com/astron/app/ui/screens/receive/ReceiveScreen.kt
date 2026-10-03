@@ -14,17 +14,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,9 +41,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,63 +50,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.astron.app.AstronApplication
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.astron.app.core.model.SessionState
-import com.astron.app.core.model.TransferManifest
-import com.astron.app.core.util.NetworkUtils
-import com.astron.app.core.util.QrCodeGenerator
 import com.astron.app.ui.components.IncomingTransferDialog
+import com.astron.app.ui.theme.BorderLight
+import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
 import com.astron.app.ui.theme.ElectricBlue
-import com.astron.app.ui.theme.SpaceBlack
-import com.astron.app.ui.theme.SpaceBorder
-import com.astron.app.ui.theme.SpaceDark
-import com.astron.app.ui.theme.SpaceSurface
+import com.astron.app.ui.theme.EmeraldVerified
+import com.astron.app.ui.theme.SurfaceLight
+import com.astron.app.ui.theme.SurfaceSubtle
 import com.astron.app.ui.theme.TextPrimary
 import com.astron.app.ui.theme.TextSecondary
-import kotlinx.coroutines.CompletableDeferred
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceiveScreen(
     onNavigateBack: () -> Unit,
-    onTransferAccepted: () -> Unit
+    onTransferAccepted: () -> Unit,
+    viewModel: ReceiveViewModel = hiltViewModel()
 ) {
-    val transferEngine = AstronApplication.instance.transferEngine
-    val prefsRepo = AstronApplication.instance.preferencesRepository
-    val deviceName by prefsRepo.deviceNameFlow.collectAsState(initial = NetworkUtils.getDefaultDeviceName())
-    val session by transferEngine.currentSession.collectAsState()
-
-    var pendingManifest by remember { mutableStateOf<TransferManifest?>(null) }
-    var approvalDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
-
-    val localIp = NetworkUtils.getLocalIpAddress()
-    val qrPayload = remember(localIp, deviceName) {
-        "astron://pair?name=${java.net.URLEncoder.encode(deviceName, "UTF-8")}&ip=${localIp ?: "127.0.0.1"}&port=52737"
-    }
-
-    val qrBitmap = remember(qrPayload) {
-        QrCodeGenerator.generateQrBitmap(qrPayload, size = 320)
-    }
+    val deviceName by viewModel.deviceName.collectAsState()
+    val session by viewModel.session.collectAsState()
+    val pendingManifest by viewModel.pendingManifest.collectAsState()
+    val qrBitmap by viewModel.qrBitmap.collectAsState()
 
     LaunchedEffect(Unit) {
-        transferEngine.onIncomingTransferPrompt = { manifest ->
-            val deferred = CompletableDeferred<Boolean>()
-            pendingManifest = manifest
-            approvalDeferred = deferred
-            val result = deferred.await()
-            pendingManifest = null
-            approvalDeferred = null
-            result
-        }
-        transferEngine.startReceiverMode()
+        viewModel.startReceiver()
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            if (session?.state == SessionState.ADVERTISING || session?.state == SessionState.IDLE) {
-                transferEngine.dismissSession()
-            }
+            viewModel.stopReceiver()
         }
     }
 
@@ -137,10 +113,11 @@ fun ReceiveScreen(
     )
 
     Scaffold(
-        containerColor = SpaceBlack,
+        containerColor = CanvasLight,
+        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
             TopAppBar(
-                title = { Text("Receive", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                title = { Text("Receive Files", color = TextPrimary, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -150,7 +127,7 @@ fun ReceiveScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SpaceBlack)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CanvasLight)
             )
         }
     ) { padding ->
@@ -161,7 +138,7 @@ fun ReceiveScreen(
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Presence Radar Pulse
             Box(
@@ -178,96 +155,132 @@ fun ReceiveScreen(
                     modifier = Modifier
                         .size(54.dp)
                         .clip(CircleShape)
-                        .background(SpaceDark)
+                        .background(CosmicCyan.copy(alpha = 0.12f))
                         .border(1.5.dp, CosmicCyan, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Wifi,
-                        contentDescription = null,
+                        contentDescription = "Broadcasting Beacon",
                         tint = CosmicCyan,
                         modifier = Modifier.size(26.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "READY TO RECEIVE",
-                color = CosmicCyan,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.5.sp
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "Your device is visible as \"$deviceName\"",
+                text = "Visible as \"$deviceName\"",
                 color = TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
             )
 
             Text(
-                text = "Anyone on the same Wi-Fi can send to you",
+                text = "Nearby senders can discover this device on the local network",
                 color = TextSecondary,
                 fontSize = 13.sp,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // QR Code Box for fast camera pairing
+            // Pairing QR Code Card for Instant Optical/Direct Pairing
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(24.dp))
-                    .background(SpaceDark)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(24.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(24.dp))
                     .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Image(
-                        bitmap = qrBitmap.asImageBitmap(),
-                        contentDescription = "Receive QR Code",
-                        modifier = Modifier.size(190.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    if (qrBitmap != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(220.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(androidx.compose.ui.graphics.Color.White)
+                                .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                                .padding(6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                bitmap = qrBitmap!!.asImageBitmap(),
+                                contentDescription = "Pairing QR Code",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(220.dp)
+                                .background(SurfaceSubtle, RoundedCornerShape(16.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = CosmicCyan, strokeWidth = 2.5.dp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     Text(
-                        text = "Scan with another phone to connect",
+                        text = "Scan to Pair Instantly",
+                        color = CosmicCyan,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Sender can scan this QR code with their camera to connect directly",
                         color = TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.weight(1f))
 
-            // IP & Network info
-            Box(
+            // IP Address & Port pill
+            Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SpaceSurface)
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(if (viewModel.localIp != null) EmeraldVerified else TextSecondary, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Wi-Fi: ${localIp ?: "Waiting for network"}",
-                    color = CosmicCyan,
+                    text = "LAN IP: ${viewModel.localIp ?: "Offline"} • Port: 52737",
+                    color = TextSecondary,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.Medium
                 )
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 
+    // Modal dialog for incoming transfer authorization
     pendingManifest?.let { manifest ->
         IncomingTransferDialog(
             manifest = manifest,
-            onAccept = { approvalDeferred?.complete(true) },
-            onDecline = { approvalDeferred?.complete(false) }
+            onAccept = {
+                viewModel.acceptIncomingTransfer()
+            },
+            onDecline = {
+                viewModel.rejectIncomingTransfer()
+            }
         )
     }
 }

@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -22,10 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Vibration
-import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -46,38 +45,36 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.astron.app.AstronApplication
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.astron.app.core.model.TransferPriority
 import com.astron.app.core.util.NetworkUtils
+import com.astron.app.ui.theme.BorderLight
+import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
-import com.astron.app.ui.theme.SpaceBlack
-import com.astron.app.ui.theme.SpaceBorder
-import com.astron.app.ui.theme.SpaceDark
-import com.astron.app.ui.theme.SpaceSurface
+import com.astron.app.ui.theme.SurfaceHover
+import com.astron.app.ui.theme.SurfaceLight
+import com.astron.app.ui.theme.SurfaceSubtle
 import com.astron.app.ui.theme.TextPrimary
 import com.astron.app.ui.theme.TextSecondary
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val prefsRepo = AstronApplication.instance.preferencesRepository
-    val scope = rememberCoroutineScope()
-
-    val deviceName by prefsRepo.deviceNameFlow.collectAsState(initial = NetworkUtils.getDefaultDeviceName())
-    val transferPriority by prefsRepo.transferPriorityFlow.collectAsState(initial = TransferPriority.BALANCED)
-    val autoAccept by prefsRepo.autoAcceptTrustedFlow.collectAsState(initial = false)
-    val haptics by prefsRepo.hapticsEnabledFlow.collectAsState(initial = true)
+    val deviceName by viewModel.deviceName.collectAsState()
+    val transferPriority by viewModel.transferPriority.collectAsState()
+    val autoAccept by viewModel.autoAcceptTrusted.collectAsState()
+    val haptics by viewModel.hapticsEnabled.collectAsState()
 
     var showNameDialog by remember { mutableStateOf(false) }
     var editNameText by remember { mutableStateOf(deviceName) }
@@ -88,7 +85,8 @@ fun SettingsScreen(
     val localIp = NetworkUtils.getLocalIpAddress()
 
     Scaffold(
-        containerColor = SpaceBlack,
+        containerColor = CanvasLight,
+        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
             TopAppBar(
                 title = { Text("Settings", color = TextPrimary, fontWeight = FontWeight.Bold) },
@@ -101,7 +99,7 @@ fun SettingsScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SpaceBlack)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CanvasLight)
             )
         }
     ) { padding ->
@@ -128,8 +126,8 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(SpaceDark)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                     .clickable {
                         editNameText = deviceName
                         showNameDialog = true
@@ -143,7 +141,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(deviceName, color = CosmicCyan, fontSize = 13.sp)
                 }
-                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Edit, contentDescription = "Edit Name", tint = TextSecondary, modifier = Modifier.size(18.dp))
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -163,8 +161,8 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(SpaceDark)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                     .clickable { showPriorityDialog = true }
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -175,7 +173,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(transferPriority.title, color = CosmicCyan, fontSize = 13.sp)
                 }
-                Icon(Icons.Default.Speed, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Speed, contentDescription = "Transfer Priority", tint = TextSecondary, modifier = Modifier.size(18.dp))
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -185,8 +183,8 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(SpaceDark)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -197,11 +195,11 @@ fun SettingsScreen(
                 }
                 Switch(
                     checked = autoAccept,
-                    onCheckedChange = { scope.launch { prefsRepo.setAutoAcceptTrusted(it) } },
+                    onCheckedChange = { viewModel.setAutoAcceptTrusted(it) },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = SpaceBlack,
+                        checkedThumbColor = Color.White,
                         checkedTrackColor = CosmicCyan,
-                        uncheckedTrackColor = SpaceSurface
+                        uncheckedTrackColor = SurfaceHover
                     )
                 )
             }
@@ -223,8 +221,8 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(SpaceDark)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -235,11 +233,11 @@ fun SettingsScreen(
                 }
                 Switch(
                     checked = haptics,
-                    onCheckedChange = { scope.launch { prefsRepo.setHapticsEnabled(it) } },
+                    onCheckedChange = { viewModel.setHapticsEnabled(it) },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = SpaceBlack,
+                        checkedThumbColor = Color.White,
                         checkedTrackColor = CosmicCyan,
-                        uncheckedTrackColor = SpaceSurface
+                        uncheckedTrackColor = SurfaceHover
                     )
                 )
             }
@@ -260,8 +258,8 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(SpaceDark)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
                     .clickable { showDiagnosticsDialog = true }
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -272,7 +270,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text("Inspect network interfaces, IP addresses & socket state", color = TextSecondary, fontSize = 12.sp)
                 }
-                Icon(Icons.Default.BugReport, contentDescription = null, tint = CosmicCyan, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.BugReport, contentDescription = "Connection Diagnostics", tint = CosmicCyan, modifier = Modifier.size(18.dp))
             }
 
             Spacer(modifier = Modifier.height(30.dp))
@@ -304,7 +302,7 @@ fun SettingsScreen(
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CosmicCyan,
-                        unfocusedBorderColor = SpaceBorder
+                        unfocusedBorderColor = BorderLight
                     )
                 )
             },
@@ -312,13 +310,13 @@ fun SettingsScreen(
                 Button(
                     onClick = {
                         if (editNameText.isNotBlank()) {
-                            scope.launch { prefsRepo.setDeviceName(editNameText) }
+                            viewModel.updateDeviceName(editNameText)
                         }
                         showNameDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan, contentColor = SpaceBlack)
+                    colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan, contentColor = Color.White)
                 ) {
-                    Text("Save")
+                    Text("Save", color = Color.White)
                 }
             },
             dismissButton = {
@@ -326,7 +324,7 @@ fun SettingsScreen(
                     Text("Cancel", color = TextSecondary)
                 }
             },
-            containerColor = SpaceDark
+            containerColor = SurfaceLight
         )
     }
 
@@ -337,14 +335,14 @@ fun SettingsScreen(
             title = { Text("Transfer Priority Mode", color = TextPrimary) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TransferPriority.values().forEach { priority ->
+                    TransferPriority.entries.forEach { priority ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (priority == transferPriority) CosmicCyan.copy(alpha = 0.15f) else SpaceSurface)
+                                .background(if (priority == transferPriority) CosmicCyan.copy(alpha = 0.1f) else SurfaceSubtle)
                                 .clickable {
-                                    scope.launch { prefsRepo.setTransferPriority(priority) }
+                                    viewModel.updateTransferPriority(priority)
                                     showPriorityDialog = false
                                 }
                                 .padding(12.dp),
@@ -356,7 +354,7 @@ fun SettingsScreen(
                                 Text(priority.description, color = TextSecondary, fontSize = 11.sp)
                             }
                             if (priority == transferPriority) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = CosmicCyan, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Check, contentDescription = "Selected", tint = CosmicCyan, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -368,7 +366,7 @@ fun SettingsScreen(
                     Text("Close", color = TextSecondary)
                 }
             },
-            containerColor = SpaceDark
+            containerColor = SurfaceLight
         )
     }
 
@@ -379,24 +377,24 @@ fun SettingsScreen(
             title = { Text("Connection Diagnostics", color = TextPrimary) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("IPv4 Address: ${localIp ?: "None (Offline)"}", color = CosmicCyan, fontSize = 13.sp)
+                    Text("IPv4 Address: ${localIp ?: "None (Offline)"}", color = CosmicCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Text("LAN Port: 52737 (TCP)", color = TextSecondary, fontSize = 13.sp)
                     Text("Web Drop Port: 8080 (HTTP)", color = TextSecondary, fontSize = 13.sp)
                     Text("Chunk Buffer Size: 128 KB", color = TextSecondary, fontSize = 13.sp)
                     Text("Encryption: AES-256-GCM (128-bit Tag)", color = TextSecondary, fontSize = 13.sp)
                     Text("Integrity: SHA-256 Checksum", color = TextSecondary, fontSize = 13.sp)
-                    Text("Optical Transport: Light Drop v1.0", color = TextSecondary, fontSize = 13.sp)
+                    Text("Optical Transport: Light Drop v1.0 (CameraX)", color = TextSecondary, fontSize = 13.sp)
                 }
             },
             confirmButton = {
                 Button(
                     onClick = { showDiagnosticsDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan, contentColor = SpaceBlack)
+                    colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan, contentColor = Color.White)
                 ) {
-                    Text("Done")
+                    Text("Done", color = Color.White)
                 }
             },
-            containerColor = SpaceDark
+            containerColor = SurfaceLight
         )
     }
 }

@@ -1,15 +1,16 @@
 package com.astron.app.ui.navigation
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import com.astron.app.ui.screens.history.HistoryScreen
 import com.astron.app.ui.screens.home.HomeScreen
 import com.astron.app.ui.screens.lightdrop.LightDropScreen
@@ -34,50 +35,85 @@ enum class Screen {
 fun MainNavigation(
     initialUris: List<Uri> = emptyList()
 ) {
-    var currentScreen by remember {
-        mutableStateOf(if (initialUris.isNotEmpty()) Screen.SEND else Screen.HOME)
+    val backStack = remember {
+        mutableStateListOf<Screen>().apply {
+            if (initialUris.isNotEmpty()) {
+                add(Screen.HOME)
+                add(Screen.SEND)
+            } else {
+                add(Screen.HOME)
+            }
+        }
+    }
+
+    val currentScreen = backStack.lastOrNull() ?: Screen.HOME
+
+    fun navigateTo(screen: Screen) {
+        if (currentScreen != screen) {
+            backStack.add(screen)
+        }
+    }
+
+    fun navigateBack() {
+        if (backStack.size > 1) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+    }
+
+    fun navigateHome() {
+        while (backStack.size > 1) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+    }
+
+    BackHandler(enabled = backStack.size > 1) {
+        navigateBack()
     }
 
     AnimatedContent(
         targetState = currentScreen,
-        transitionSpec = { fadeIn() togetherWith fadeOut() },
+        transitionSpec = {
+            (fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.97f, animationSpec = tween(220)))
+                .togetherWith(fadeOut(animationSpec = tween(180)))
+        },
         label = "navigation"
     ) { screen ->
         when (screen) {
             Screen.HOME -> HomeScreen(
-                onNavigateToSend = { currentScreen = Screen.SEND },
-                onNavigateToReceive = { currentScreen = Screen.RECEIVE },
-                onNavigateToWebDrop = { currentScreen = Screen.WEBDROP },
-                onNavigateToLightDrop = { currentScreen = Screen.LIGHTDROP },
-                onNavigateToHistory = { currentScreen = Screen.HISTORY },
-                onNavigateToSettings = { currentScreen = Screen.SETTINGS }
+                onNavigateToSend = { navigateTo(Screen.SEND) },
+                onNavigateToReceive = { navigateTo(Screen.RECEIVE) },
+                onNavigateToWebDrop = { navigateTo(Screen.WEBDROP) },
+                onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
+                onNavigateToHistory = { navigateTo(Screen.HISTORY) },
+                onNavigateToSettings = { navigateTo(Screen.SETTINGS) }
             )
             Screen.SEND -> SendScreen(
-                onNavigateBack = { currentScreen = Screen.HOME },
-                onTransferStarted = { currentScreen = Screen.TRANSFER },
-                onNavigateToWebDrop = { currentScreen = Screen.WEBDROP },
-                onNavigateToLightDrop = { currentScreen = Screen.LIGHTDROP },
+                onNavigateBack = { navigateBack() },
+                onTransferStarted = { navigateTo(Screen.TRANSFER) },
+                onNavigateToWebDrop = { navigateTo(Screen.WEBDROP) },
+                onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
                 initialUris = initialUris
             )
             Screen.RECEIVE -> ReceiveScreen(
-                onNavigateBack = { currentScreen = Screen.HOME },
-                onTransferAccepted = { currentScreen = Screen.TRANSFER }
+                onNavigateBack = { navigateBack() },
+                onTransferAccepted = { navigateTo(Screen.TRANSFER) }
             )
             Screen.TRANSFER -> TransferScreen(
-                onDismiss = { currentScreen = Screen.HOME }
+                onDismiss = { navigateHome() }
             )
             Screen.WEBDROP -> WebDropScreen(
-                onNavigateBack = { currentScreen = Screen.HOME }
+                onNavigateBack = { navigateBack() }
             )
             Screen.LIGHTDROP -> LightDropScreen(
-                onNavigateBack = { currentScreen = Screen.HOME }
+                onNavigateBack = { navigateBack() }
             )
             Screen.HISTORY -> HistoryScreen(
-                onNavigateBack = { currentScreen = Screen.HOME }
+                onNavigateBack = { navigateBack() }
             )
             Screen.SETTINGS -> SettingsScreen(
-                onNavigateBack = { currentScreen = Screen.HOME }
+                onNavigateBack = { navigateBack() }
             )
         }
     }
 }
+

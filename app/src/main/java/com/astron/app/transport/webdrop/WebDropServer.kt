@@ -29,10 +29,19 @@ class WebDropServer(
     companion object {
         const val TAG = "WebDropServer"
         const val DEFAULT_PORT = 8080
+        const val MAX_UPLOAD_BYTES = 10L * 1024 * 1024 * 1024 // 10 GB
+
+        fun htmlEscape(s: String): String =
+            s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;")
     }
 
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
+    private var executor: java.util.concurrent.ExecutorService? = null
 
     private var sharedFiles: List<TransferItem> = emptyList()
     private var sessionToken: String = ""
@@ -66,6 +75,7 @@ class WebDropServer(
         this@WebDropServer.deviceName = deviceName
         this@WebDropServer.sharedFiles = filesToShare
         this@WebDropServer.sessionToken = CryptoManager.generateSessionToken(8)
+        this@WebDropServer.executor = java.util.concurrent.Executors.newFixedThreadPool(4)
 
         try {
             serverSocket = ServerSocket().apply {
@@ -82,10 +92,10 @@ class WebDropServer(
                     break
                 }
 
-                // Handle HTTP request on background thread
-                Thread {
+                // Handle HTTP request with bounded thread pool
+                executor?.execute {
                     handleClientRequest(client, onFileUploaded)
-                }.start()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "WebDrop server error", e)
@@ -96,6 +106,10 @@ class WebDropServer(
 
     fun stopServer() {
         isRunning = false
+        try {
+            executor?.shutdownNow()
+        } catch (_: Exception) {}
+        executor = null
         try {
             serverSocket?.close()
         } catch (_: Exception) {}
@@ -121,17 +135,28 @@ class WebDropServer(
             val headers = mutableMapOf<String, String>()
             var line: String?
             while (!reader.readLine().also { line = it }.isNullOrBlank()) {
-                val separator = line!!.indexOf(':')
+                val currentLine = line ?: break
+                val separator = currentLine.indexOf(':')
                 if (separator > 0) {
-                    val key = line!!.substring(0, separator).trim().lowercase()
-                    val value = line!!.substring(separator + 1).trim()
+                    val key = currentLine.substring(0, separator).trim().lowercase()
+                    val value = currentLine.substring(separator + 1).trim()
                     headers[key] = value
                 }
+            }
+
+            if (method == "OPTIONS") {
+                send204NoContent(outStream)
+                return
             }
 
             if (method == "GET") {
                 when {
                     path == "/" -> serveWebClientHtml(outStream)
+                    path == "/api/status" -> {
+                        val safeDevice = htmlEscape(deviceName)
+                        val json = "{\"deviceName\":\"$safeDevice\",\"filesCount\":${sharedFiles.size}}"
+                        send200Json(outStream, json)
+                    }
                     path.startsWith("/download/") -> {
                         val fileId = path.removePrefix("/download/")
                         val item = sharedFiles.find { it.id == fileId }
@@ -143,12 +168,18 @@ class WebDropServer(
                     }
                     else -> send404(outStream)
                 }
-            } else if (method == "POST" && path == "/upload") {
+            } else if (method == "POST" && (path == "/upload" || path == "/api/upload")) {
                 val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
+                if (contentLength > MAX_UPLOAD_BYTES) {
+                    send413(outStream, "File exceeds 10 GB limit")
+                    return
+                }
+
                 val rawFileName = headers["x-filename"] ?: "upload_${System.currentTimeMillis()}"
                 val fileName = CryptoManager.sanitizeFilename(URLDecoder.decode(rawFileName, "UTF-8"))
 
                 val targetFile = File(storageManager.getAstronDownloadDirectory(), fileName)
+                targetFile.parentFile?.mkdirs()
                 targetFile.outputStream().use { fos ->
                     val buffer = ByteArray(64 * 1024)
                     var bytesRemaining = contentLength
@@ -173,15 +204,24 @@ class WebDropServer(
         }
     }
 
+    private fun corsHeaders(): String =
+        "Access-Control-Allow-Origin: *\r\n" +
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+        "Access-Control-Allow-Headers: X-Filename, Content-Type, Content-Length\r\n"
+
+
     private fun serveWebClientHtml(out: OutputStream) {
+        val safeDeviceName = htmlEscape(deviceName)
         val fileCards = sharedFiles.joinToString("\n") { file ->
+            val safeFileName = htmlEscape(file.name)
+            val safeMime = htmlEscape(file.mimeType)
             """
             <div class="card">
                 <div class="file-info">
-                    <div class="file-name">${file.name}</div>
-                    <div class="file-meta">${NetworkUtils.formatBytes(file.size)} • ${file.mimeType}</div>
+                    <div class="file-name">$safeFileName</div>
+                    <div class="file-meta">${NetworkUtils.formatBytes(file.size)} • $safeMime</div>
                 </div>
-                <a href="/download/${file.id}" class="btn-download" download="${file.name}">Download</a>
+                <a href="/download/${file.id}" class="btn-download" download="$safeFileName">Download</a>
             </div>
             """.trimIndent()
         }
@@ -192,7 +232,7 @@ class WebDropServer(
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Astron Web Drop — $deviceName</title>
+            <title>Astron Web Drop — $safeDeviceName</title>
             <style>
                 :root {
                     --bg-dark: #070A12;
@@ -235,7 +275,7 @@ class WebDropServer(
                 <header>
                     <div class="logo-ring">A</div>
                     <h1>Astron Web Drop</h1>
-                    <p class="sub">Connected to <strong>$deviceName</strong></p>
+                    <p class="sub">Connected to <strong>$safeDeviceName</strong></p>
                     <div class="badge">Direct P2P Encrypted Session</div>
                 </header>
 
@@ -243,16 +283,42 @@ class WebDropServer(
                 ${if (sharedFiles.isEmpty()) "<p style='color:var(--text-muted);font-size:14px;'>No files queued for download right now. You can send files to the phone below.</p>" else fileCards}
 
                 <div class="section-title">Send Files to Phone</div>
-                <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-box" id="uploadBox" onclick="document.getElementById('fileInput').click()">
                     <div class="upload-icon">↑</div>
                     <div class="upload-text">Click or drag files here to send</div>
-                    <div class="upload-sub">Files will be saved directly to $deviceName</div>
+                    <div class="upload-sub">Files will be saved directly to $safeDeviceName</div>
                     <input type="file" id="fileInput" multiple onchange="handleFiles(this.files)">
                     <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
                 </div>
             </div>
 
             <script>
+                const uploadBox = document.getElementById('uploadBox');
+                if (uploadBox) {
+                    ['dragenter', 'dragover'].forEach(eventName => {
+                        uploadBox.addEventListener(eventName, (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            uploadBox.style.borderColor = 'var(--cyan)';
+                            uploadBox.style.background = 'var(--surface-hover)';
+                        }, false);
+                    });
+                    ['dragleave', 'drop'].forEach(eventName => {
+                        uploadBox.addEventListener(eventName, (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            uploadBox.style.borderColor = 'var(--border)';
+                            uploadBox.style.background = 'var(--surface)';
+                        }, false);
+                    });
+                    uploadBox.addEventListener('drop', (e) => {
+                        const dt = e.dataTransfer;
+                        if (dt && dt.files && dt.files.length > 0) {
+                            handleFiles(dt.files);
+                        }
+                    }, false);
+                }
+
                 function handleFiles(files) {
                     if (!files || files.length === 0) return;
                     const bar = document.getElementById('progressBar');
@@ -273,7 +339,7 @@ class WebDropServer(
                         xhr.onload = () => {
                             uploaded++;
                             if (uploaded === files.length) {
-                                alert('All files uploaded successfully to ' + '$deviceName' + '!');
+                                alert('All files uploaded successfully!');
                                 bar.style.display = 'none';
                                 fill.style.width = '0%';
                             }
@@ -287,7 +353,11 @@ class WebDropServer(
         """.trimIndent()
 
         val bytes = html.toByteArray(Charsets.UTF_8)
-        val header = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
+        val header = "HTTP/1.1 200 OK\r\n" +
+                corsHeaders() +
+                "Content-Type: text/html; charset=UTF-8\r\n" +
+                "Content-Length: ${bytes.size}\r\n" +
+                "Connection: close\r\n\r\n"
         out.write(header.toByteArray(Charsets.UTF_8))
         out.write(bytes)
         out.flush()
@@ -296,8 +366,14 @@ class WebDropServer(
     private fun serveFileDownload(item: TransferItem, out: OutputStream) {
         try {
             val uri = Uri.parse(item.uriString)
-            val stream = storageManager.openInputStreamAtOffset(uri, 0L)
+            val stream = try {
+                storageManager.openInputStreamAtOffset(uri, 0L)
+            } catch (t: Throwable) {
+                send404(out)
+                return
+            }
             val header = "HTTP/1.1 200 OK\r\n" +
+                    corsHeaders() +
                     "Content-Type: ${item.mimeType}\r\n" +
                     "Content-Length: ${item.size}\r\n" +
                     "Content-Disposition: attachment; filename=\"${item.name}\"\r\n" +
@@ -317,16 +393,43 @@ class WebDropServer(
         }
     }
 
+    private fun send204NoContent(out: OutputStream) {
+        val header = "HTTP/1.1 204 No Content\r\n" +
+                corsHeaders() +
+                "Content-Length: 0\r\n" +
+                "Connection: close\r\n\r\n"
+        out.write(header.toByteArray(Charsets.UTF_8))
+        out.flush()
+    }
+
+    private fun send413(out: OutputStream, message: String) {
+        val body = "413 Payload Too Large: $message"
+        val header = "HTTP/1.1 413 Payload Too Large\r\n" +
+                corsHeaders() +
+                "Content-Type: text/plain; charset=UTF-8\r\n" +
+                "Content-Length: ${body.length}\r\n" +
+                "Connection: close\r\n\r\n"
+        out.write((header + body).toByteArray(Charsets.UTF_8))
+        out.flush()
+    }
+
     private fun send404(out: OutputStream) {
         val body = "404 Not Found"
-        val header = "HTTP/1.1 404 Not Found\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n"
+        val header = "HTTP/1.1 404 Not Found\r\n" +
+                corsHeaders() +
+                "Content-Length: ${body.length}\r\n" +
+                "Connection: close\r\n\r\n"
         out.write((header + body).toByteArray(Charsets.UTF_8))
         out.flush()
     }
 
     private fun send200Json(out: OutputStream, json: String) {
         val bytes = json.toByteArray(Charsets.UTF_8)
-        val header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
+        val header = "HTTP/1.1 200 OK\r\n" +
+                corsHeaders() +
+                "Content-Type: application/json\r\n" +
+                "Content-Length: ${bytes.size}\r\n" +
+                "Connection: close\r\n\r\n"
         out.write(header.toByteArray(Charsets.UTF_8))
         out.write(bytes)
         out.flush()

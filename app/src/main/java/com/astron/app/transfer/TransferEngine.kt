@@ -22,6 +22,7 @@ import com.astron.app.transport.webdrop.WebDropServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,20 +36,48 @@ class TransferEngine(
     private val context: Context,
     val storageManager: StorageManager,
     val preferencesRepository: PreferencesRepository,
-    val historyRepository: HistoryRepository
+    val historyRepository: HistoryRepository,
+    val lanTransport: LanTransport = LanTransport(context, storageManager),
+    val webDropServer: WebDropServer = WebDropServer(context, storageManager),
+    val lightDropManager: LightDropManager = LightDropManager()
 ) {
     companion object {
         const val TAG = "TransferEngine"
         private const val SPEED_SMOOTHING_FACTOR = 0.25f // Exponential moving average weight
     }
 
-    private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var activeJob: Job? = null
     private var isCancelledFlag = false
 
-    val lanTransport = LanTransport(context, storageManager)
-    val webDropServer = WebDropServer(context, storageManager)
-    val lightDropManager = LightDropManager()
+    init {
+        scope.launch(Dispatchers.IO) {
+            try {
+                storageManager.cleanupOrphanedPartialFiles()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error cleaning orphaned partial files", e)
+            }
+        }
+    }
+
+    // Pause/Resume state
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
+    fun togglePause() {
+        val next = !_isPaused.value
+        _isPaused.value = next
+        _currentSession.update { current ->
+            if (current != null) {
+                if (next) current.copy(state = SessionState.PAUSED)
+                else current.copy(state = SessionState.TRANSFERRING)
+            } else null
+        }
+    }
+
+    suspend fun awaitUnpause() {
+        _isPaused.first { !it }
+    }
 
     // Discovered nearby peers on LAN/NSD
     private val _discoveredPeers = MutableStateFlow<List<PeerDevice>>(emptyList())
@@ -150,7 +179,8 @@ class TransferEngine(
                         )
                     }
                 },
-                isCancelled = { isCancelledFlag }
+                isCancelled = { isCancelledFlag },
+                awaitUnpause = { awaitUnpause() }
             )
 
             val duration = System.currentTimeMillis() - startTime
@@ -266,7 +296,8 @@ class TransferEngine(
                         )
                     }
                 },
-                isCancelled = { isCancelledFlag }
+                isCancelled = { isCancelledFlag },
+                awaitUnpause = { awaitUnpause() }
             )
         }
     }
@@ -325,6 +356,7 @@ class TransferEngine(
 
     fun cancelTransfer() {
         isCancelledFlag = true
+        _isPaused.value = false
         activeJob?.cancel()
         lanTransport.stopAdvertising()
         lanTransport.stopDiscovery()

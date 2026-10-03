@@ -6,29 +6,40 @@ import android.net.Uri
 import android.os.Environment
 import android.os.StatFs
 import android.provider.OpenableColumns
+import android.util.Log
 import com.astron.app.core.model.DuplicateAction
 import com.astron.app.core.model.TransferItem
 import com.astron.app.core.security.CryptoManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.util.UUID
 
 class StorageManager(private val context: Context) {
 
-    private val contentResolver: ContentResolver = context.contentResolver
+    private val contentResolver: ContentResolver? = try { context.contentResolver } catch (_: Exception) { null }
+
+    var customDownloadDirectory: File? = null
 
     /**
      * Gets or creates the primary incoming storage directory (Downloads/Astron).
      */
     fun getAstronDownloadDirectory(): File {
-        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        customDownloadDirectory?.let {
+            if (!it.exists()) it.mkdirs()
+            return it
+        }
+        val downloads = try {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        } catch (_: Throwable) {
+            File(System.getProperty("java.io.tmpdir", "."), "AstronDownloads")
+        } ?: File(System.getProperty("java.io.tmpdir", "."), "AstronDownloads")
+
         val astronFolder = File(downloads, "Astron")
         if (!astronFolder.exists()) {
-            astronFolder.mkdirs()
+            try { astronFolder.mkdirs() } catch (_: Throwable) {}
         }
         return astronFolder
     }
@@ -47,31 +58,39 @@ class StorageManager(private val context: Context) {
     }
 
     /**
-     * Resolves metadata for a picked URI (name, size, MIME type).
+     * Resolves metadata for a picked URI (name, size, MIME type) safely.
      */
     fun queryTransferItem(uri: Uri): TransferItem {
         var name = "unknown_${System.currentTimeMillis()}"
         var size = 0L
-        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        val mimeType = try { contentResolver?.getType(uri) } catch (_: Throwable) { null } ?: "application/octet-stream"
 
-        if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                if (cursor.moveToFirst()) {
-                    if (nameIndex != -1 && !cursor.isNull(nameIndex)) {
-                        name = cursor.getString(nameIndex)
-                    }
-                    if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
-                        size = cursor.getLong(sizeIndex)
+        try {
+            if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+                contentResolver?.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (cursor.moveToFirst()) {
+                        if (nameIndex != -1 && !cursor.isNull(nameIndex)) {
+                            name = cursor.getString(nameIndex)
+                        }
+                        if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+                            size = cursor.getLong(sizeIndex)
+                        }
                     }
                 }
+            } else if (uri.scheme == ContentResolver.SCHEME_FILE) {
+                val file = File(uri.path ?: "")
+                if (file.exists()) {
+                    name = file.name
+                    size = file.length()
+                }
             }
-        } else if (uri.scheme == ContentResolver.SCHEME_FILE) {
-            val file = File(uri.path ?: "")
-            if (file.exists()) {
-                name = file.name
-                size = file.length()
+        } catch (e: Throwable) {
+            Log.w("StorageManager", "URI resolution fallback for $uri: ${e.message}")
+            val lastSegment = uri.lastPathSegment
+            if (!lastSegment.isNullOrBlank()) {
+                name = lastSegment.substringAfterLast('/')
             }
         }
 
@@ -90,8 +109,16 @@ class StorageManager(private val context: Context) {
      * Essential for resuming interrupted transfers without retransmitting previous bytes.
      */
     fun openInputStreamAtOffset(uri: Uri, startOffset: Long): InputStream {
-        val stream = contentResolver.openInputStream(uri)
-            ?: throw IllegalStateException("Cannot open input stream for $uri")
+        val stream = try {
+            if (uri.scheme == "file") {
+                File(uri.path ?: "").inputStream()
+            } else {
+                contentResolver?.openInputStream(uri)
+            }
+        } catch (e: Throwable) {
+            null
+        } ?: throw IllegalStateException("Cannot open input stream for $uri")
+
         if (startOffset > 0) {
             var skipped = 0L
             while (skipped < startOffset) {
@@ -155,12 +182,75 @@ class StorageManager(private val context: Context) {
     }
 
     /**
+     * Scans the download directory for abandoned .partial or temporary transfer files older than maxAgeMillis
+     * and safely deletes them to reclaim device storage.
+     */
+    fun cleanupOrphanedPartialFiles(maxAgeMillis: Long = 24 * 60 * 60 * 1000L): Int {
+        val dir = getAstronDownloadDirectory()
+        var cleaned = 0
+        val now = System.currentTimeMillis()
+        try {
+            dir.walkTopDown().forEach { file ->
+                if (file.isFile && (file.name.endsWith(".partial") || file.name.endsWith(".tmp"))) {
+                    if (now - file.lastModified() > maxAgeMillis) {
+                        if (file.delete()) cleaned++
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return cleaned
+    }
+
+    /**
      * Appends bytes directly to a destination file using RandomAccessFile at a target offset.
      */
     suspend fun writeChunkAtOffset(file: File, offset: Long, data: ByteArray, length: Int) = withContext(Dispatchers.IO) {
+        file.parentFile?.mkdirs()
         RandomAccessFile(file, "rw").use { raf ->
             raf.seek(offset)
             raf.write(data, 0, length)
+        }
+    }
+
+    /**
+     * Opens a high-performance write session for sequential chunk writing without reopening file handles.
+     */
+    fun openWriteSession(file: File, initialOffset: Long = 0L): FileWriteSession {
+        file.parentFile?.mkdirs()
+        val session = FileWriteSession(file)
+        if (initialOffset > 0) {
+            session.seekTo(initialOffset)
+        }
+        return session
+    }
+
+    class FileWriteSession(val file: File) : java.io.Closeable {
+        init {
+            file.parentFile?.mkdirs()
+        }
+        private val raf = RandomAccessFile(file, "rw")
+        private var currentOffset = 0L
+
+        @Synchronized
+        fun writeChunk(data: ByteArray, length: Int) {
+            raf.seek(currentOffset)
+            raf.write(data, 0, length)
+            currentOffset += length
+        }
+
+        @Synchronized
+        fun seekTo(offset: Long) {
+            currentOffset = offset
+            raf.seek(offset)
+        }
+
+        override fun close() {
+            try {
+                raf.fd.sync()
+            } catch (_: Exception) {}
+            try {
+                raf.close()
+            } catch (_: Exception) {}
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.astron.app.ui.components
 
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -26,13 +28,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,14 +50,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.astron.app.core.model.PeerDevice
+import com.astron.app.core.model.TransportType
+import com.astron.app.ui.theme.BorderLight
+import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
 import com.astron.app.ui.theme.ElectricBlue
-import com.astron.app.ui.theme.SpaceBlack
-import com.astron.app.ui.theme.SpaceBorder
-import com.astron.app.ui.theme.SpaceDark
-import com.astron.app.ui.theme.SpaceSurface
+import com.astron.app.ui.theme.SurfaceHover
+import com.astron.app.ui.theme.SurfaceLight
+import com.astron.app.ui.theme.SurfaceSubtle
 import com.astron.app.ui.theme.TextPrimary
 import com.astron.app.ui.theme.TextSecondary
+import java.net.URLDecoder
 
 @Composable
 fun ProximityRadarSheet(
@@ -60,6 +70,8 @@ fun ProximityRadarSheet(
     onLightDropSelected: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isQrScanMode by remember { mutableStateOf(false) }
+
     val infiniteTransition = rememberInfiniteTransition(label = "radar")
     val pulse1 by infiniteTransition.animateFloat(
         initialValue = 0.4f,
@@ -84,8 +96,8 @@ fun ProximityRadarSheet(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(SpaceDark)
-            .border(1.dp, SpaceBorder, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .background(SurfaceLight)
+            .border(1.dp, BorderLight, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             .padding(24.dp)
     ) {
         // Drag handle
@@ -95,142 +107,209 @@ fun ProximityRadarSheet(
                 .width(44.dp)
                 .height(4.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(TextSecondary.copy(alpha = 0.3f))
+                .background(SurfaceHover)
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
+        // Header with Radar / QR Scan Mode Switch
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Who are you sending to?",
+                    text = if (isQrScanMode) "Scan Receiver's QR Code" else "Who are you sending to?",
                     color = TextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Automatic zero-config high speed discovery",
+                    text = if (isQrScanMode) "Point camera at the QR code on receiver's screen" else "Zero-config high speed local peer discovery",
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
             }
 
-            // Radar pulse indicator
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .scale(pulse1)
-                        .background(CosmicCyan.copy(alpha = alpha1), CircleShape)
-                )
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .background(CosmicCyan, CircleShape)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        if (discoveredPeers.isEmpty()) {
-            Box(
+            // Mode toggle button (Radar <-> QR Camera)
+            Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 24.dp),
-                contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SurfaceSubtle)
+                    .border(1.dp, BorderLight, RoundedCornerShape(12.dp))
+                    .padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(32.dp),
-                        color = CosmicCyan,
-                        strokeWidth = 2.5.dp
+                IconButton(
+                    onClick = { isQrScanMode = false },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (!isQrScanMode) CosmicCyan else Color.Transparent)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Radar,
+                        contentDescription = "Radar Mode",
+                        tint = if (!isQrScanMode) Color.White else TextSecondary,
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Searching for nearby devices on Wi-Fi...",
-                        color = TextSecondary,
-                        fontSize = 13.sp
+                }
+
+                IconButton(
+                    onClick = { isQrScanMode = true },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isQrScanMode) CosmicCyan else Color.Transparent)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = "Scan Pairing QR",
+                        tint = if (isQrScanMode) Color.White else TextSecondary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
-        } else {
-            LazyColumn(
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        if (isQrScanMode) {
+            // Live Camera QR Scanner Mode
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .height(260.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(1.dp, BorderLight, RoundedCornerShape(20.dp))
             ) {
-                items(discoveredPeers) { peer ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(SpaceSurface)
-                            .border(1.dp, CosmicCyan.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                            .clickable { onSelectPeer(peer) }
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                CameraQrScanner(
+                    modifier = Modifier.fillMaxWidth().height(260.dp),
+                    onQrScanned = { qrText ->
+                        val peer = parsePairingQr(qrText)
+                        if (peer != null) {
+                            onSelectPeer(peer)
+                        }
+                    }
+                )
+            }
+        } else {
+            // Radar Peer List Mode
+            if (discoveredPeers.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(SurfaceSubtle)
+                        .border(1.dp, BorderLight, RoundedCornerShape(18.dp))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Brush.linearGradient(listOf(CosmicCyan, ElectricBlue))),
-                            contentAlignment = Alignment.Center
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.size(48.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Devices,
-                                contentDescription = null,
-                                tint = SpaceBlack,
-                                modifier = Modifier.size(22.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .scale(pulse1)
+                                    .background(CosmicCyan.copy(alpha = alpha1), CircleShape)
+                            )
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                color = CosmicCyan,
+                                strokeWidth = 2.5.dp
                             )
                         }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = peer.name,
-                                color = TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Ready • ${peer.transportType.badge} • ${peer.hostAddress}",
-                                color = CosmicCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-
-                        Box(
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "Searching for nearby devices on Wi-Fi...",
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Or tap QR Scanner above to pair directly",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(discoveredPeers) { peer ->
+                        Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(CosmicCyan.copy(alpha = 0.15f))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(SurfaceSubtle)
+                                .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                                .clickable { onSelectPeer(peer) }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Send",
-                                color = CosmicCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(CosmicCyan, ElectricBlue))),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Devices,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = peer.name,
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Ready • ${peer.transportType.badge} • ${peer.hostAddress}",
+                                    color = CosmicCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(CosmicCyan)
+                                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = "Send",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         // Alternative modes
         Row(
@@ -241,8 +320,8 @@ fun ProximityRadarSheet(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(SpaceSurface)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(14.dp))
+                    .background(SurfaceSubtle)
+                    .border(1.dp, BorderLight, RoundedCornerShape(14.dp))
                     .clickable { onWebDropSelected() }
                     .padding(vertical = 12.dp, horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -251,12 +330,12 @@ fun ProximityRadarSheet(
                     imageVector = Icons.Default.Wifi,
                     contentDescription = null,
                     tint = CosmicCyan,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text("Web Drop", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("No App Needed", color = TextSecondary, fontSize = 10.sp)
+                    Text("Browser share", color = TextSecondary, fontSize = 11.sp)
                 }
             }
 
@@ -264,8 +343,8 @@ fun ProximityRadarSheet(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(SpaceSurface)
-                    .border(1.dp, SpaceBorder, RoundedCornerShape(14.dp))
+                    .background(SurfaceSubtle)
+                    .border(1.dp, BorderLight, RoundedCornerShape(14.dp))
                     .clickable { onLightDropSelected() }
                     .padding(vertical = 12.dp, horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -274,14 +353,42 @@ fun ProximityRadarSheet(
                     imageVector = Icons.Default.FlashOn,
                     contentDescription = null,
                     tint = ElectricBlue,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text("Light Drop", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Zero-Radio Optical", color = TextSecondary, fontSize = 10.sp)
+                    Text("Optical Air-Gap", color = TextSecondary, fontSize = 11.sp)
                 }
             }
         }
+    }
+}
+
+/**
+ * Parses an Astron pairing QR string into a PeerDevice.
+ * Format: astron://pair?name=<name>&ip=<ip>&port=<port>
+ */
+private fun parsePairingQr(qrText: String): PeerDevice? {
+    return try {
+        val uri = Uri.parse(qrText)
+        if (uri.scheme == "astron" && uri.host == "pair") {
+            val rawName = uri.getQueryParameter("name") ?: "Astron Receiver"
+            val name = try { URLDecoder.decode(rawName, "UTF-8") } catch (_: Exception) { rawName }
+            val ip = uri.getQueryParameter("ip") ?: return null
+            val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 52737
+            PeerDevice(
+                id = "peer-qr-$ip-$port",
+                name = name,
+                hostAddress = ip,
+                port = port,
+                transportType = TransportType.LOCAL_WIFI,
+                lastSeen = System.currentTimeMillis()
+            )
+        } else {
+            null
+        }
+    } catch (_: Exception) {
+        null
     }
 }
