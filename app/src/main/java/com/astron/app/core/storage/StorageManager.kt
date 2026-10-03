@@ -1,0 +1,166 @@
+package com.astron.app.core.storage
+
+import android.content.ContentResolver
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.os.StatFs
+import android.provider.OpenableColumns
+import com.astron.app.core.model.DuplicateAction
+import com.astron.app.core.model.TransferItem
+import com.astron.app.core.security.CryptoManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.RandomAccessFile
+import java.util.UUID
+
+class StorageManager(private val context: Context) {
+
+    private val contentResolver: ContentResolver = context.contentResolver
+
+    /**
+     * Gets or creates the primary incoming storage directory (Downloads/Astron).
+     */
+    fun getAstronDownloadDirectory(): File {
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val astronFolder = File(downloads, "Astron")
+        if (!astronFolder.exists()) {
+            astronFolder.mkdirs()
+        }
+        return astronFolder
+    }
+
+    /**
+     * Queries available free disk space on the target storage volume in bytes.
+     */
+    fun getAvailableStorageBytes(): Long {
+        val path = getAstronDownloadDirectory()
+        return try {
+            val stat = StatFs(path.path)
+            stat.availableBlocksLong * stat.blockSizeLong
+        } catch (_: Exception) {
+            1024L * 1024L * 1024L * 10L // Fallback 10GB if unable to query
+        }
+    }
+
+    /**
+     * Resolves metadata for a picked URI (name, size, MIME type).
+     */
+    fun queryTransferItem(uri: Uri): TransferItem {
+        var name = "unknown_${System.currentTimeMillis()}"
+        var size = 0L
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+
+        if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (cursor.moveToFirst()) {
+                    if (nameIndex != -1 && !cursor.isNull(nameIndex)) {
+                        name = cursor.getString(nameIndex)
+                    }
+                    if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+                        size = cursor.getLong(sizeIndex)
+                    }
+                }
+            }
+        } else if (uri.scheme == ContentResolver.SCHEME_FILE) {
+            val file = File(uri.path ?: "")
+            if (file.exists()) {
+                name = file.name
+                size = file.length()
+            }
+        }
+
+        return TransferItem(
+            id = UUID.randomUUID().toString(),
+            name = CryptoManager.sanitizeFilename(name),
+            size = size,
+            mimeType = mimeType,
+            uriString = uri.toString(),
+            relativePath = ""
+        )
+    }
+
+    /**
+     * Opens a bounded InputStream for reading a file at a specific byte offset.
+     * Essential for resuming interrupted transfers without retransmitting previous bytes.
+     */
+    fun openInputStreamAtOffset(uri: Uri, startOffset: Long): InputStream {
+        val stream = contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("Cannot open input stream for $uri")
+        if (startOffset > 0) {
+            var skipped = 0L
+            while (skipped < startOffset) {
+                val n = stream.skip(startOffset - skipped)
+                if (n <= 0) break
+                skipped += n
+            }
+        }
+        return stream
+    }
+
+    /**
+     * Resolves the target destination File for an incoming file, handling relative folder hierarchy
+     * and duplicate filename conflicts (REPLACE, KEEP_BOTH, SKIP).
+     */
+    suspend fun prepareDestinationFile(
+        rawName: String,
+        relativePath: String,
+        duplicateAction: DuplicateAction
+    ): File = withContext(Dispatchers.IO) {
+        val baseDir = getAstronDownloadDirectory()
+        val sanitizedName = CryptoManager.sanitizeFilename(rawName)
+        
+        val targetDir = if (relativePath.isNotBlank()) {
+            val cleanRel = relativePath.trim('/').replace("..", "_")
+            File(baseDir, cleanRel).also { it.mkdirs() }
+        } else {
+            baseDir
+        }
+
+        var candidate = File(targetDir, sanitizedName)
+
+        if (candidate.exists()) {
+            when (duplicateAction) {
+                DuplicateAction.REPLACE -> {
+                    // Ready to overwrite
+                }
+                DuplicateAction.KEEP_BOTH -> {
+                    val baseName = candidate.nameWithoutExtension
+                    val ext = candidate.extension.let { if (it.isNotBlank()) ".$it" else "" }
+                    var counter = 1
+                    while (candidate.exists()) {
+                        candidate = File(targetDir, "$baseName ($counter)$ext")
+                        counter++
+                    }
+                }
+                DuplicateAction.SKIP -> {
+                    // Marker: caller can check candidate.exists()
+                }
+            }
+        }
+
+        candidate
+    }
+
+    /**
+     * Prepares an existing partial file for resumable write by returning its current length.
+     */
+    fun getExistingPartialLength(file: File): Long {
+        return if (file.exists()) file.length() else 0L
+    }
+
+    /**
+     * Appends bytes directly to a destination file using RandomAccessFile at a target offset.
+     */
+    suspend fun writeChunkAtOffset(file: File, offset: Long, data: ByteArray, length: Int) = withContext(Dispatchers.IO) {
+        RandomAccessFile(file, "rw").use { raf ->
+            raf.seek(offset)
+            raf.write(data, 0, length)
+        }
+    }
+}
