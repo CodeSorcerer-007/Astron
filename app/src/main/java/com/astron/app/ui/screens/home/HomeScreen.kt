@@ -99,7 +99,7 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun HomeScreen(
-    onNavigateToSend: () -> Unit,
+    onNavigateToSend: (List<com.astron.app.core.model.TransferItem>) -> Unit,
     onNavigateToReceive: () -> Unit,
     onNavigateToWebDrop: () -> Unit,
     onNavigateToLightDrop: () -> Unit,
@@ -110,6 +110,7 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val hapticEngine = com.astron.app.core.util.LocalHapticEngine.current
 
     val deviceName by viewModel.deviceName.collectAsState()
     val historyList by viewModel.recentTransfers.collectAsState()
@@ -182,15 +183,19 @@ fun HomeScreen(
                 )
             }
 
-            // Action Icons: Downloads folder, Transfer History, Settings
+            // Action Icons: Built-in File Explorer, Transfer History, Settings
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    AppFileManager.openDownloadsFolder(context)
+                    hapticEngine?.click() ?: haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (onNavigateToFileBrowser != null) {
+                        onNavigateToFileBrowser()
+                    } else {
+                        AppFileManager.openDownloadsFolder(context)
+                    }
                 }) {
                     Icon(
                         imageVector = Icons.Default.FolderOpen,
-                        contentDescription = "Downloads Folder",
+                        contentDescription = "Built-in File Explorer",
                         tint = TextSecondary
                     )
                 }
@@ -317,7 +322,7 @@ fun HomeScreen(
                         Button(
                             onClick = {
                                 if (session.direction == com.astron.app.core.model.TransferDirection.SEND) {
-                                    onNavigateToSend()
+                                    onNavigateToSend(emptyList())
                                 } else {
                                     onNavigateToReceive()
                                 }
@@ -419,11 +424,11 @@ fun HomeScreen(
                 .background(Brush.horizontalGradient(listOf(CosmicCyan, ElectricBlue)))
                 .semantics { contentDescription = "Send files, photos, videos, or apps" }
                 .clickable {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    hapticEngine?.heavyClick() ?: haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     if (!permissionsState.allPermissionsGranted) {
                         showPermissionSheet = true
                     } else {
-                        onNavigateToSend()
+                        onNavigateToSend(emptyList())
                     }
                 }
                 .padding(horizontal = 22.dp),
@@ -891,7 +896,8 @@ fun HomeScreen(
             onDismiss = { showAppPickerSheet = false },
             onAppsSelected = { chosenApps ->
                 showAppPickerSheet = false
-                onNavigateToSend()
+                val transferItems = chosenApps.map { AppFileManager.appToTransferItem(it) }
+                onNavigateToSend(transferItems)
             }
         )
     }

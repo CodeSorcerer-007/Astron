@@ -221,10 +221,8 @@ fun ProximityRadarSheet(
                                     .scale(pulse1)
                                     .background(CosmicCyan.copy(alpha = alpha1), CircleShape)
                             )
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(32.dp),
-                                color = CosmicCyan,
-                                strokeWidth = 2.5.dp
+                            CosmicCompactSpinner(
+                                modifier = Modifier.size(32.dp)
                             )
                         }
                         Spacer(modifier = Modifier.height(14.dp))

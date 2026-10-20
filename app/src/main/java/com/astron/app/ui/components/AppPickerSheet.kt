@@ -179,11 +179,10 @@ fun AppPickerSheet(
                         .height(300.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = CosmicCyan, strokeWidth = 3.dp)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Reading APK manifests...", color = TextSecondary, fontSize = 13.sp)
-                    }
+                    CosmicOrbitLoader(
+                        size = 80.dp,
+                        message = "Reading installed APK manifests..."
+                    )
                 }
             } else if (filteredApps.isEmpty()) {
                 Box(

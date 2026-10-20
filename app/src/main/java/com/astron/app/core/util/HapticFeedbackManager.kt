@@ -2,11 +2,13 @@ package com.astron.app.core.util
 
 import android.content.Context
 import android.os.Build
-import android.os.CombinedVibration
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import androidx.compose.runtime.staticCompositionLocalOf
+
+val LocalHapticEngine = staticCompositionLocalOf<HapticFeedbackManager?> { null }
 
 /**
  * Hardware-accelerated haptic sensory feedback engine.
@@ -17,6 +19,8 @@ class HapticFeedbackManager(private val context: Context) {
     companion object {
         private const val TAG = "HapticManager"
     }
+
+    var isEnabled: Boolean = true
 
     private val vibrator: Vibrator? by lazy {
         try {
@@ -37,6 +41,7 @@ class HapticFeedbackManager(private val context: Context) {
      * Subtle tick on UI interactions (item selection, slider, radar pulse).
      */
     fun tick() {
+        if (!isEnabled) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
@@ -51,6 +56,7 @@ class HapticFeedbackManager(private val context: Context) {
      * Crisp click on primary actions (Send/Receive tap, peer tap).
      */
     fun click() {
+        if (!isEnabled) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
@@ -65,6 +71,7 @@ class HapticFeedbackManager(private val context: Context) {
      * Firm feedback on transfer initiation or peer connection.
      */
     fun heavyClick() {
+        if (!isEnabled) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
@@ -79,6 +86,7 @@ class HapticFeedbackManager(private val context: Context) {
      * Celebratory double-pulse rumble on transfer completion & SHA-256 verification.
      */
     fun success() {
+        if (!isEnabled) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val timings = longArrayOf(0, 40, 80, 70)
@@ -95,6 +103,7 @@ class HapticFeedbackManager(private val context: Context) {
      * Triple warning buzz on transfer failure or connection drop.
      */
     fun error() {
+        if (!isEnabled) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val timings = longArrayOf(0, 50, 60, 50, 60, 80)

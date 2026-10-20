@@ -64,6 +64,7 @@ import com.astron.app.ui.components.CosmicStarfield
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
+import com.astron.app.ui.theme.ElectricBlue
 import com.astron.app.ui.theme.SurfaceHover
 import com.astron.app.ui.theme.SurfaceLight
 import com.astron.app.ui.theme.SurfaceSubtle
@@ -82,6 +83,16 @@ fun SettingsScreen(
     val haptics by viewModel.hapticsEnabled.collectAsState()
     val soundEnabled by viewModel.soundEnabled.collectAsState()
     val darkMode by viewModel.darkMode.collectAsState()
+
+    val hapticEngine = com.astron.app.core.util.LocalHapticEngine.current
+    val switchColors = SwitchDefaults.colors(
+        checkedThumbColor = Color.White,
+        checkedTrackColor = CosmicCyan,
+        checkedBorderColor = CosmicCyan,
+        uncheckedThumbColor = if (com.astron.app.ui.theme.LocalAstronColors.current.isDark) ElectricBlue else Color(0xFF64748B),
+        uncheckedTrackColor = if (com.astron.app.ui.theme.LocalAstronColors.current.isDark) Color(0xFF162036) else Color(0xFFE2E8F0),
+        uncheckedBorderColor = if (com.astron.app.ui.theme.LocalAstronColors.current.isDark) CosmicCyan.copy(alpha = 0.5f) else Color(0xFF94A3B8)
+    )
 
     var showNameDialog by remember { mutableStateOf(false) }
     var editNameText by remember { mutableStateOf(deviceName) }
@@ -208,12 +219,11 @@ fun SettingsScreen(
                 }
                 Switch(
                     checked = autoAccept,
-                    onCheckedChange = { viewModel.setAutoAcceptTrusted(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = CosmicCyan,
-                        uncheckedTrackColor = SurfaceHover
-                    )
+                    onCheckedChange = { 
+                        hapticEngine?.click()
+                        viewModel.setAutoAcceptTrusted(it) 
+                    },
+                    colors = switchColors
                 )
             }
 
@@ -246,12 +256,11 @@ fun SettingsScreen(
                 }
                 Switch(
                     checked = darkMode,
-                    onCheckedChange = { viewModel.setDarkMode(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = CosmicCyan,
-                        uncheckedTrackColor = SurfaceHover
-                    )
+                    onCheckedChange = { 
+                        hapticEngine?.click()
+                        viewModel.setDarkMode(it) 
+                    },
+                    colors = switchColors
                 )
             }
 
@@ -274,12 +283,11 @@ fun SettingsScreen(
                 }
                 Switch(
                     checked = haptics,
-                    onCheckedChange = { viewModel.setHapticsEnabled(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = CosmicCyan,
-                        uncheckedTrackColor = SurfaceHover
-                    )
+                    onCheckedChange = { 
+                        hapticEngine?.click()
+                        viewModel.setHapticsEnabled(it) 
+                    },
+                    colors = switchColors
                 )
             }
 
@@ -302,12 +310,11 @@ fun SettingsScreen(
                 }
                 Switch(
                     checked = soundEnabled,
-                    onCheckedChange = { viewModel.setSoundEnabled(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = CosmicCyan,
-                        uncheckedTrackColor = SurfaceHover
-                    )
+                    onCheckedChange = { 
+                        hapticEngine?.click()
+                        viewModel.setSoundEnabled(it) 
+                    },
+                    colors = switchColors
                 )
             }
 

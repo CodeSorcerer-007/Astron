@@ -102,6 +102,7 @@ fun FileBrowserScreen(
     viewModel: FileBrowserViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val hapticEngine = com.astron.app.core.util.LocalHapticEngine.current
     val uiState by viewModel.uiState.collectAsState()
     var showSortMenu by remember { mutableStateOf(false) }
 
@@ -214,6 +215,7 @@ fun FileBrowserScreen(
 
                         Button(
                             onClick = {
+                                hapticEngine?.heavyClick()
                                 val selected = viewModel.getSelectedTransferItems()
                                 onConfirmSelection(selected)
                             },
@@ -251,7 +253,7 @@ fun FileBrowserScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(14.dp),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -262,7 +264,7 @@ fun FileBrowserScreen(
 
             // Category Chips Row
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(vertical = 4.dp)
             ) {
@@ -284,7 +286,7 @@ fun FileBrowserScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -295,11 +297,17 @@ fun FileBrowserScreen(
                 )
 
                 Row {
-                    TextButton(onClick = { viewModel.selectAll() }) {
+                    TextButton(onClick = {
+                        hapticEngine?.click()
+                        viewModel.selectAll()
+                    }) {
                         Text("Select All", style = MaterialTheme.typography.labelMedium)
                     }
                     if (uiState.totalSelectedCount > 0) {
-                        TextButton(onClick = { viewModel.clearSelection() }) {
+                        TextButton(onClick = {
+                            hapticEngine?.click()
+                            viewModel.clearSelection()
+                        }) {
                             Text("Clear", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
                         }
                     }
@@ -309,7 +317,10 @@ fun FileBrowserScreen(
             // File Grid / List Content
             if (uiState.isLoading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    com.astron.app.ui.components.CosmicOrbitLoader(
+                        size = 84.dp,
+                        message = "Indexing cosmic files..."
+                    )
                 }
             } else if (uiState.items.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -357,7 +368,7 @@ fun FileBrowserScreen(
 
                 LazyVerticalGrid(
                     columns = columns,
-                    contentPadding = PaddingValues(12.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
@@ -368,14 +379,20 @@ fun FileBrowserScreen(
                             MediaGridCard(
                                 item = item,
                                 isSelected = isSelected,
-                                onToggle = { viewModel.toggleSelection(item) },
+                                onToggle = {
+                                    hapticEngine?.tick()
+                                    viewModel.toggleSelection(item)
+                                },
                                 onPreview = { viewModel.openPreview(item) }
                             )
                         } else {
                             FileListCard(
                                 item = item,
                                 isSelected = isSelected,
-                                onToggle = { viewModel.toggleSelection(item) },
+                                onToggle = {
+                                    hapticEngine?.tick()
+                                    viewModel.toggleSelection(item)
+                                },
                                 onPreview = { viewModel.openPreview(item) }
                             )
                         }

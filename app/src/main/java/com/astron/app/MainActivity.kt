@@ -51,14 +51,21 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val isDark by preferencesRepository.darkModeFlow.collectAsState(initial = false)
-            AstronTheme(darkTheme = isDark) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val uris by remember { _sharedUris }
-                    val nfcData by remember { _nfcPayload }
-                    MainNavigation(initialUris = uris, initialNfcPayload = nfcData)
+            val isHapticOn by preferencesRepository.hapticsEnabledFlow.collectAsState(initial = true)
+            hapticManager.isEnabled = isHapticOn
+
+            androidx.compose.runtime.CompositionLocalProvider(
+                com.astron.app.core.util.LocalHapticEngine provides hapticManager
+            ) {
+                AstronTheme(darkTheme = isDark) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        val uris by remember { _sharedUris }
+                        val nfcData by remember { _nfcPayload }
+                        MainNavigation(initialUris = uris, initialNfcPayload = nfcData)
+                    }
                 }
             }
         }

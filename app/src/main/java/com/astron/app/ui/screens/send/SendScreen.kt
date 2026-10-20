@@ -96,10 +96,12 @@ fun SendScreen(
     onNavigateToLightDrop: () -> Unit,
     onNavigateToFileBrowser: (() -> Unit)? = null,
     initialUris: List<Uri> = emptyList(),
+    initialItems: List<TransferItem> = emptyList(),
     initialNfcPayload: com.astron.app.core.nfc.NfcPairingPayload? = null,
     viewModel: SendViewModel = hiltViewModel()
 ) {
     val haptic = LocalHapticFeedback.current
+    val hapticEngine = com.astron.app.core.util.LocalHapticEngine.current
 
     val selectedItems by viewModel.selectedItems.collectAsState()
     val discoveredPeers by viewModel.discoveredPeers.collectAsState()
@@ -112,6 +114,14 @@ fun SendScreen(
 
     LaunchedEffect(initialUris) {
         viewModel.initializeWithUris(initialUris)
+    }
+
+    LaunchedEffect(initialItems) {
+        if (initialItems.isNotEmpty()) {
+            viewModel.addTransferItems(initialItems)
+            viewModel.startDiscovery()
+            showRadarSheet = true
+        }
     }
 
     LaunchedEffect(initialNfcPayload) {
@@ -199,7 +209,7 @@ fun SendScreen(
 
                         Button(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                hapticEngine?.heavyClick() ?: haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.startDiscovery()
                                 showRadarSheet = true
                             },

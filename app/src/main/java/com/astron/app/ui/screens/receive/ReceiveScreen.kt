@@ -173,7 +173,7 @@ fun ReceiveScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(horizontal = 24.dp),
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -289,7 +289,10 @@ fun ReceiveScreen(
                                     .background(SurfaceSubtle, RoundedCornerShape(16.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = CosmicCyan, strokeWidth = 2.5.dp)
+                                com.astron.app.ui.components.CosmicOrbitLoader(
+                                    size = 80.dp,
+                                    message = "Generating pairing matrix..."
+                                )
                             }
                         }
 

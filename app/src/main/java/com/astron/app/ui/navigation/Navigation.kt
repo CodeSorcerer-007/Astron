@@ -107,7 +107,10 @@ fun MainNavigation(
     ) { screen ->
         when (screen) {
             Screen.HOME -> HomeScreen(
-                onNavigateToSend = { navigateTo(Screen.SEND) },
+                onNavigateToSend = { items ->
+                    pendingSendItems = items
+                    navigateTo(Screen.SEND)
+                },
                 onNavigateToReceive = { navigateTo(Screen.RECEIVE) },
                 onNavigateToWebDrop = {
                     pendingSendItems = emptyList()
@@ -128,6 +131,7 @@ fun MainNavigation(
                 onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
                 onNavigateToFileBrowser = { navigateTo(Screen.FILE_BROWSER) },
                 initialUris = initialUris,
+                initialItems = pendingSendItems,
                 initialNfcPayload = initialNfcPayload
             )
             Screen.RECEIVE -> ReceiveScreen(
