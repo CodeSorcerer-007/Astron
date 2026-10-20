@@ -4,6 +4,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.ksp)
   alias(libs.plugins.hilt.android)
+  alias(libs.plugins.room)
 }
 
 android {
@@ -43,6 +44,10 @@ android {
 
     testOptions {
       unitTests.isReturnDefaultValues = true
+    }
+
+    room {
+        schemaDirectory("$projectDir/schemas")
     }
 }
 
@@ -111,4 +116,26 @@ dependencies {
 
   // Permissions (Accompanist)
   implementation(libs.accompanist.permissions)
+
+  // Room — crash-safe transfer state persistence
+  implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.room.ktx)
+  ksp(libs.androidx.room.compiler)
+
+  // WorkManager — scheduled & auto-backup transfers
+  implementation(libs.androidx.work.runtime.ktx)
+
+  // Coil — image thumbnails & previews
+  implementation(libs.coil.compose)
+  implementation(libs.coil.video)
+
+  // Media3 (ExoPlayer) — video preview
+  implementation(libs.androidx.media3.exoplayer)
+  implementation(libs.androidx.media3.ui)
+
+  // Ktor — internet relay transport
+  implementation(libs.ktor.client.android)
+  implementation(libs.ktor.client.websockets)
+  implementation(libs.ktor.client.content.negotiation)
+  implementation(libs.ktor.serialization.kotlinx.json)
 }

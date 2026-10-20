@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
@@ -104,6 +105,7 @@ fun HomeScreen(
     onNavigateToLightDrop: () -> Unit,
     onNavigateToHistory: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToFileBrowser: (() -> Unit)? = null,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -114,6 +116,7 @@ fun HomeScreen(
     val localIp by viewModel.localIpAddress.collectAsState()
     val storageInfo by viewModel.storageInfo.collectAsState()
     val latestFile by viewModel.latestReceivedFile.collectAsState()
+    val interruptedSessions by viewModel.interruptedSessions.collectAsState()
 
     var showAppPickerSheet by remember { mutableStateOf(false) }
     var showDiagnosticsSheet by remember { mutableStateOf(false) }
@@ -247,6 +250,88 @@ fun HomeScreen(
 
         // Astron Logo Hero
         AstronLogoHeader(compact = true)
+
+        // Interrupted Session Recovery Card
+        if (interruptedSessions.isNotEmpty()) {
+            val session = interruptedSessions.first()
+            Spacer(modifier = Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.horizontalGradient(
+                            listOf(CosmicCyan.copy(alpha = 0.15f), StellarViolet.copy(alpha = 0.2f))
+                        )
+                    )
+                    .border(1.dp, CosmicCyan.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = null,
+                                tint = CosmicCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Interrupted Transfer Detected",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(onClick = { viewModel.dismissInterruptedSession(session.sessionId) }) {
+                            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Transfer with ${session.peerName} was paused or interrupted. You can resume without re-downloading completed chunks.",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val progress = if (session.totalBytes > 0) (session.transferredBytes.toFloat() / session.totalBytes).coerceIn(0f, 1f) else 0f
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = CosmicCyan,
+                        trackColor = SurfaceSubtle
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(
+                            onClick = {
+                                if (session.direction == com.astron.app.core.model.TransferDirection.SEND) {
+                                    onNavigateToSend()
+                                } else {
+                                    onNavigateToReceive()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Text("Resume Transfer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -460,7 +545,70 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (onNavigateToFileBrowser != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(68.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(18.dp))
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onNavigateToFileBrowser()
+                    }
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CosmicCyan.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                tint = CosmicCyan,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "FILE EXPLORER",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "Browse photos, videos, docs & APKs with live previews",
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "Open file explorer",
+                        tint = CosmicCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
 
         // QUICK SUITE: Installed Apps, Web Drop, Light Drop
         Row(
@@ -784,7 +932,7 @@ fun HomeScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Astron requires camera, local network, and notification permissions to stream optical QR codes and discover nearby devices.",
+                    text = "Astron requires storage, nearby devices, camera, and notification permissions to discover peers, preview media, and transfer files seamlessly.",
                     color = TextSecondary,
                     fontSize = 13.sp,
                     lineHeight = 18.sp

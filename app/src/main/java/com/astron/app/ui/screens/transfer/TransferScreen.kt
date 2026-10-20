@@ -428,7 +428,17 @@ fun TransferScreen(
             strokeCap = StrokeCap.Round
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Real-Time Dynamic Throughput Sparkline Graph
+        AnimatedVisibility(visible = !isTerminal) {
+            com.astron.app.ui.components.SpeedGraphView(
+                currentSpeedBps = speed,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         // File Count Summary card
         Box(

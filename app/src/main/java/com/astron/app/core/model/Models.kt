@@ -17,7 +17,36 @@ data class TransferItem(
     val isDirectory: Boolean = false,
     val transferredBytes: Long = 0L,
     val status: ItemStatus = ItemStatus.PENDING
-)
+) {
+    val uri: android.net.Uri? get() = if (uriString.isNotBlank()) android.net.Uri.parse(uriString) else null
+    val realFilePath: String? get() = if (uriString.startsWith("file://")) uriString.removePrefix("file://") else if (uriString.startsWith("/")) uriString else null
+
+    constructor(
+        id: String,
+        name: String,
+        size: Long,
+        mimeType: String,
+        uri: android.net.Uri? = null,
+        realFilePath: String? = null,
+        relativePath: String = "",
+        checksumSha256: String? = null,
+        isDirectory: Boolean = false,
+        transferredBytes: Long = 0L,
+        status: ItemStatus = ItemStatus.PENDING
+    ) : this(
+        id = id,
+        name = name,
+        size = size,
+        mimeType = mimeType,
+        uriString = uri?.toString() ?: (realFilePath?.let { "file://$it" } ?: ""),
+        relativePath = relativePath,
+        checksumSha256 = checksumSha256,
+        isDirectory = isDirectory,
+        transferredBytes = transferredBytes,
+        status = status
+    )
+}
+
 
 @Serializable
 enum class ItemStatus {
@@ -76,9 +105,13 @@ data class PeerDevice(
 enum class TransportType(val displayName: String, val badge: String) {
     LOCAL_WIFI("Local Wi-Fi", "⚡ High-Speed LAN"),
     WIFI_DIRECT("Wi-Fi Direct", "📶 Direct P2P"),
+    HOTSPOT("Hotspot", "📡 Local Hotspot"),
+    BLUETOOTH("Bluetooth", "🔵 Bluetooth Classic"),
+    INTERNET_RELAY("Internet Relay", "🌍 Remote Transfer"),
     WEB_DROP("Web Drop", "🌐 Browser Mode"),
     OPTICAL_LIGHT("Light Drop", "✨ Zero-Radio Optical"),
-    BLUETOOTH("Bluetooth", "🔵 BLE")
+    WIFI_AWARE("Wi-Fi Aware", "📡 NAN Direct"),
+    USB_OTG("USB OTG", "🔌 USB Transfer")
 }
 
 enum class TransferDirection {

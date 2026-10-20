@@ -80,6 +80,10 @@ object CryptoManager {
         return cipher.doFinal(encryptedBytes, GCM_IV_LENGTH, encryptedBytes.size - GCM_IV_LENGTH)
     }
 
+    fun deriveKeyFromSecret(secret: String): SecretKey = deriveKeyFromToken(secret)
+    fun encryptPayload(plainBytes: ByteArray, secretKey: SecretKey): ByteArray = encryptAesGcm(plainBytes, secretKey)
+    fun decryptPayload(encryptedBytes: ByteArray, secretKey: SecretKey): ByteArray = decryptAesGcm(encryptedBytes, secretKey)
+
     /**
      * Computes the SHA-256 checksum of an InputStream in a streaming fashion.
      * Memory bounded to 64KB buffer. Stream is cleanly closed to prevent file descriptor leaks.

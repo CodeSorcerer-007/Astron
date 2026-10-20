@@ -1,4 +1,4 @@
-﻿package com.astron.app.core.util
+package com.astron.app.core.util
 
 import android.content.Context
 import android.content.Intent
@@ -26,6 +26,8 @@ data class InstalledAppItem(
 object AppFileManager {
 
     private const val TAG = "AppFileManager"
+
+    fun formatFileSize(bytes: Long): String = NetworkUtils.formatBytes(bytes)
 
     /**
      * Lists all user-installed applications that can be shared as APK files.

@@ -12,10 +12,18 @@ import com.astron.app.core.model.TransferItem
 import com.astron.app.core.model.TransferManifest
 import com.astron.app.core.model.TransportType
 import com.astron.app.core.security.CryptoManager
+import com.astron.app.core.storage.DuplicateDetector
 import com.astron.app.core.storage.StorageManager
+import com.astron.app.core.util.SoundFeedbackManager
 import com.astron.app.data.HistoryRepository
 import com.astron.app.data.PreferencesRepository
+import com.astron.app.data.db.TransferPersistenceManager
 import com.astron.app.service.TransferForegroundService
+import com.astron.app.transport.CapabilityDetector
+import com.astron.app.transport.TransportOrchestrator
+import com.astron.app.transport.bluetooth.BluetoothClassicTransport
+import com.astron.app.transport.hotspot.HotspotManager
+import com.astron.app.transport.internet.InternetRelayTransport
 import com.astron.app.transport.lan.LanTransport
 import com.astron.app.transport.lightdrop.LightDropManager
 import com.astron.app.transport.webdrop.WebDropServer
@@ -23,6 +31,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,10 +39,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.Closeable
-import kotlinx.coroutines.cancel
 import java.io.File
-import com.astron.app.core.util.SoundFeedbackManager
-import com.astron.app.transport.hotspot.HotspotManager
 import java.util.UUID
 
 class TransferEngine(
@@ -45,7 +51,13 @@ class TransferEngine(
     val webDropServer: WebDropServer = WebDropServer(context, storageManager),
     val lightDropManager: LightDropManager = LightDropManager(),
     val soundFeedbackManager: SoundFeedbackManager = SoundFeedbackManager(),
-    val hotspotManager: HotspotManager = HotspotManager(context)
+    val hotspotManager: HotspotManager = HotspotManager(context),
+    val bluetoothTransport: BluetoothClassicTransport = BluetoothClassicTransport(context),
+    val internetRelayTransport: InternetRelayTransport = InternetRelayTransport(context, storageManager),
+    val transportOrchestrator: TransportOrchestrator = TransportOrchestrator(context),
+    val persistenceManager: TransferPersistenceManager? = null,
+    val duplicateDetector: DuplicateDetector = DuplicateDetector(storageManager),
+    val transferQueue: TransferQueue = TransferQueue()
 ) : Closeable {
     companion object {
         const val TAG = "TransferEngine"
@@ -60,6 +72,8 @@ class TransferEngine(
         activeJob?.cancel()
         soundFeedbackManager.close()
         hotspotManager.close()
+        bluetoothTransport.disconnect()
+        internetRelayTransport.close()
         scope.cancel()
     }
 
@@ -67,6 +81,7 @@ class TransferEngine(
         scope.launch(Dispatchers.IO) {
             try {
                 storageManager.cleanupOrphanedPartialFiles()
+                persistenceManager?.markStartupInterruptedSessions()
             } catch (e: Exception) {
                 Log.w(TAG, "Error cleaning orphaned partial files", e)
             }
@@ -92,7 +107,7 @@ class TransferEngine(
         _isPaused.first { !it }
     }
 
-    // Discovered nearby peers on LAN/NSD
+    // Discovered nearby peers on LAN, Bluetooth, etc.
     private val _discoveredPeers = MutableStateFlow<List<PeerDevice>>(emptyList())
     val discoveredPeers: StateFlow<List<PeerDevice>> = _discoveredPeers.asStateFlow()
 
@@ -116,6 +131,9 @@ class TransferEngine(
 
     fun startPeerDiscovery() {
         _discoveredPeers.value = emptyList()
+        CapabilityDetector.refresh(context)
+
+        // 1. LAN / NSD Discovery
         lanTransport.startDiscovery(
             onPeerFound = { peer ->
                 _discoveredPeers.update { current ->
@@ -130,10 +148,30 @@ class TransferEngine(
                 }
             }
         )
+
+        // 2. Bluetooth Classic paired and nearby discovery
+        if (bluetoothTransport.isAvailable()) {
+            val paired = bluetoothTransport.getPairedDevices()
+            paired.forEach { device ->
+                val peer = with(bluetoothTransport) { device.toPeerDevice() }
+                _discoveredPeers.update { current ->
+                    if (current.none { it.hostAddress == peer.hostAddress }) current + peer else current
+                }
+            }
+
+            bluetoothTransport.startDiscovery { device ->
+                val peer = with(bluetoothTransport) { device.toPeerDevice() }
+                _discoveredPeers.update { current ->
+                    val filtered = current.filter { it.hostAddress != peer.hostAddress }
+                    filtered + peer
+                }
+            }
+        }
     }
 
     fun stopPeerDiscovery() {
         lanTransport.stopDiscovery()
+        bluetoothTransport.stopDiscovery()
     }
 
     /**
@@ -190,6 +228,15 @@ class TransferEngine(
             _currentSession.value = session
             TransferForegroundService.start(context, peer.name)
 
+            // Persist session start for crash-safety
+            persistenceManager?.saveSessionStart(
+                sessionId = sessionId,
+                direction = TransferDirection.SEND,
+                peer = peer,
+                manifest = manifest,
+                items = items
+            )
+
             val priority = preferencesRepository.transferPriorityFlow.first()
             val soundEnabled = preferencesRepository.soundEnabledFlow.first()
             val startTime = System.currentTimeMillis()
@@ -198,34 +245,93 @@ class TransferEngine(
             _currentSession.update { it?.copy(state = SessionState.TRANSFERRING) }
             soundFeedbackManager.playTransferStart(soundEnabled)
 
-            val success = lanTransport.sendFiles(
-                peer = peer,
-                manifest = manifest,
-                items = items,
-                priority = priority,
-                onProgress = { transferred, total, activeFileName ->
-                    updateThroughputAndProgress(transferred, total, activeFileName, peer.name)
-                },
-                onFileVerified = { fileId ->
-                    _currentSession.update { current ->
-                        if (current == null) return@update null
-                        val updatedItems = current.items.map { item ->
-                            if (item.id == fileId) item.copy(status = ItemStatus.COMPLETED) else item
-                        }
-                        current.copy(
-                            items = updatedItems,
-                            verifiedFilesCount = current.verifiedFilesCount + 1
-                        )
-                    }
-                },
-                isCancelled = { isCancelledFlag },
-                awaitUnpause = { awaitUnpause() }
-            )
+            // Orchestrated multi-transport dispatch
+            val success = when (peer.transportType) {
+                TransportType.INTERNET_RELAY -> {
+                    internetRelayTransport.sendViaRelay(
+                        pairingCode = peer.hostAddress.ifBlank { "astron-${peer.id.take(6)}" },
+                        manifest = manifest,
+                        items = items,
+                        onProgress = { transferred, total, activeFileName ->
+                            updateThroughputAndProgress(transferred, total, activeFileName, peer.name)
+                        },
+                        onFileVerified = { fileId ->
+                            markFileVerified(fileId)
+                        },
+                        isCancelled = { isCancelledFlag },
+                        awaitUnpause = { awaitUnpause() }
+                    )
+                }
+
+                TransportType.BLUETOOTH -> {
+                    val paired = bluetoothTransport.getPairedDevices().find { it.address.equals(peer.hostAddress, ignoreCase = true) }
+                        ?: bluetoothTransport.discoveredDevices.value.find { it.address.equals(peer.hostAddress, ignoreCase = true) }
+
+                    if (paired != null) {
+                        val socket = bluetoothTransport.connectToDevice(paired)
+                        if (socket != null) {
+                            var allOk = true
+                            var totalBytesSent = 0L
+                            for (item in items) {
+                                if (isCancelledFlag) break
+                                val itemUri = item.uri
+                                val itemPath = item.realFilePath
+                                val stream = try {
+                                    if (itemUri != null) context.contentResolver.openInputStream(itemUri)
+                                    else if (itemPath != null) File(itemPath).inputStream()
+                                    else null
+                                } catch (e: Exception) { null }
+
+                                if (stream == null) {
+                                    allOk = false
+                                    continue
+                                }
+                                val ok = stream.use { inStream ->
+                                    bluetoothTransport.sendStream(
+                                        socket = socket,
+                                        data = inStream,
+                                        totalBytes = item.size,
+                                        sessionToken = sessionId,
+                                        onProgress = { bytes ->
+                                            updateThroughputAndProgress(totalBytesSent + bytes, totalBytes, item.name, peer.name)
+                                        },
+                                        isActive = { !isCancelledFlag }
+                                    )
+                                }
+                                totalBytesSent += item.size
+                                if (!ok) allOk = false
+                                markFileVerified(item.id)
+                            }
+                            bluetoothTransport.disconnect()
+                            allOk
+                        } else false
+                    } else false
+                }
+
+                else -> {
+                    // LOCAL_WIFI, WIFI_DIRECT, HOTSPOT
+                    lanTransport.sendFiles(
+                        peer = peer,
+                        manifest = manifest,
+                        items = items,
+                        priority = priority,
+                        onProgress = { transferred, total, activeFileName ->
+                            updateThroughputAndProgress(transferred, total, activeFileName, peer.name)
+                        },
+                        onFileVerified = { fileId ->
+                            markFileVerified(fileId)
+                        },
+                        isCancelled = { isCancelledFlag },
+                        awaitUnpause = { awaitUnpause() }
+                    )
+                }
+            }
 
             val duration = System.currentTimeMillis() - startTime
             TransferForegroundService.stop(context)
 
             if (success) {
+                persistenceManager?.markSessionComplete(sessionId)
                 soundFeedbackManager.playTransferComplete(soundEnabled)
                 _currentSession.update {
                     it?.copy(
@@ -248,7 +354,14 @@ class TransferEngine(
                         transportType = peer.transportType
                     )
                 )
+
+                // Check for queued batch
+                val nextBatch = transferQueue.dequeue()
+                if (nextBatch != null) {
+                    startSendTransfer(nextBatch.targetPeer, nextBatch.items)
+                }
             } else {
+                persistenceManager?.markSessionCancelled(sessionId)
                 val finalState = if (isCancelledFlag) SessionState.CANCELLED else SessionState.FAILED
                 _currentSession.update { it?.copy(state = finalState) }
                 historyRepository.addRecord(
@@ -265,6 +378,22 @@ class TransferEngine(
                     )
                 )
             }
+        }
+    }
+
+    private fun markFileVerified(fileId: String) {
+        _currentSession.update { current ->
+            if (current == null) return@update null
+            val updatedItems = current.items.map { item ->
+                if (item.id == fileId) item.copy(status = ItemStatus.COMPLETED) else item
+            }
+            current.copy(
+                items = updatedItems,
+                verifiedFilesCount = current.verifiedFilesCount + 1
+            )
+        }
+        scope.launch(Dispatchers.IO) {
+            persistenceManager?.markFileCompleted(fileId, true)
         }
     }
 
@@ -360,6 +489,9 @@ class TransferEngine(
                             verifiedFilesCount = nextCount
                         )
                     }
+                    scope.launch(Dispatchers.IO) {
+                        persistenceManager?.markFileCompleted(fileId, isVerified)
+                    }
                 },
                 isCancelled = { isCancelledFlag },
                 awaitUnpause = { awaitUnpause() }
@@ -409,6 +541,22 @@ class TransferEngine(
                 smoothedSpeedBps,
                 activeFileName
             )
+
+            // Room Checkpoint
+            scope.launch(Dispatchers.IO) {
+                val s = _currentSession.value ?: return@launch
+                val currentFile = s.items.find { it.name == activeFileName }
+                if (currentFile != null) {
+                    persistenceManager?.updateChunkProgress(
+                        sessionId = s.sessionId,
+                        fileId = currentFile.id,
+                        fileBytesTransferred = transferred,
+                        sessionTotalTransferred = transferred,
+                        chunkIndex = 0,
+                        offset = transferred
+                    )
+                }
+            }
         } else {
             _currentSession.update {
                 it?.copy(
@@ -427,6 +575,8 @@ class TransferEngine(
         lanTransport.stopDiscovery()
         lanTransport.stopReceiverServer()
         webDropServer.stopServer()
+        bluetoothTransport.disconnect()
+        internetRelayTransport.close()
         TransferForegroundService.stop(context)
         _currentSession.update { it?.copy(state = SessionState.CANCELLED) }
     }

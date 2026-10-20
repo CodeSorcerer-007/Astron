@@ -29,19 +29,61 @@ class StorageManager(private val context: Context) {
     fun getAstronDownloadDirectory(): File {
         customDownloadDirectory?.let {
             if (!it.exists()) it.mkdirs()
-            return it
+            if (it.canWrite()) return it
         }
         val downloads = try {
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        } catch (_: Throwable) {
-            File(System.getProperty("java.io.tmpdir", "."), "AstronDownloads")
-        } ?: File(System.getProperty("java.io.tmpdir", "."), "AstronDownloads")
+        } catch (_: Throwable) { null }
 
-        val astronFolder = File(downloads, "Astron")
-        if (!astronFolder.exists()) {
-            try { astronFolder.mkdirs() } catch (_: Throwable) {}
+        if (downloads != null) {
+            val astronFolder = File(downloads, "Astron")
+            if (!astronFolder.exists()) {
+                try { astronFolder.mkdirs() } catch (_: Throwable) {}
+            }
+            if (astronFolder.exists() && astronFolder.canWrite()) {
+                return astronFolder
+            }
+            if (downloads.exists() && downloads.canWrite()) {
+                return downloads
+            }
         }
-        return astronFolder
+
+        // Resilient Scoped Storage Fallback: App-specific external storage always has full read/write permission without system permissions
+        val appExternal = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        if (appExternal != null) {
+            val appAstron = File(appExternal, "Astron")
+            if (!appAstron.exists()) {
+                try { appAstron.mkdirs() } catch (_: Throwable) {}
+            }
+            if (appAstron.exists() && appAstron.canWrite()) {
+                return appAstron
+            }
+            return appExternal
+        }
+
+        return context.filesDir
+    }
+
+    val downloadDirectory: File get() = getAstronDownloadDirectory()
+
+    fun createDestinationFile(name: String, relativePath: String = ""): File {
+        val baseDir = getAstronDownloadDirectory()
+        val targetDir = if (relativePath.isNotBlank()) {
+            val cleanRel = relativePath.trim('/').replace("..", "_")
+            File(baseDir, cleanRel).also { it.mkdirs() }
+        } else {
+            baseDir
+        }
+        val sanitized = CryptoManager.sanitizeFilename(name)
+        var file = File(targetDir, sanitized)
+        var counter = 1
+        val base = file.nameWithoutExtension
+        val ext = file.extension.let { if (it.isNotBlank()) ".$it" else "" }
+        while (file.exists()) {
+            file = File(targetDir, "$base ($counter)$ext")
+            counter++
+        }
+        return file
     }
 
     /**

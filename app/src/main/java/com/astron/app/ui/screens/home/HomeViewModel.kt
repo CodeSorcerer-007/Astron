@@ -7,19 +7,25 @@ import com.astron.app.core.util.AppFileManager
 import com.astron.app.core.util.NetworkUtils
 import com.astron.app.data.HistoryRepository
 import com.astron.app.data.PreferencesRepository
+import com.astron.app.data.db.TransferPersistenceManager
+import com.astron.app.data.db.TransferSessionEntity
+import com.astron.app.transport.TransportOrchestrator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
-    private val historyRepository: HistoryRepository
+    private val historyRepository: HistoryRepository,
+    private val persistenceManager: TransferPersistenceManager,
+    private val transportOrchestrator: TransportOrchestrator
 ) : ViewModel() {
 
     val deviceName: StateFlow<String> = preferencesRepository.deviceNameFlow
@@ -30,6 +36,13 @@ class HomeViewModel @Inject constructor(
         )
 
     val recentTransfers: StateFlow<List<TransferHistoryRecord>> = historyRepository.historyFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    val interruptedSessions: StateFlow<List<TransferSessionEntity>> = persistenceManager.observeInterruptedSessions()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -49,5 +62,13 @@ class HomeViewModel @Inject constructor(
         _localIpAddress.value = NetworkUtils.getLocalIpAddress()
         _storageInfo.value = AppFileManager.getStorageInfo()
         _latestReceivedFile.value = AppFileManager.getLatestReceivedFile()
+        transportOrchestrator.evaluate()
+    }
+
+    fun dismissInterruptedSession(sessionId: String) {
+        viewModelScope.launch {
+            persistenceManager.deleteSession(sessionId)
+        }
     }
 }
+

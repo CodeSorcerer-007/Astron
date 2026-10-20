@@ -34,7 +34,8 @@ enum class Screen {
     WEBDROP,
     LIGHTDROP,
     HISTORY,
-    SETTINGS
+    SETTINGS,
+    FILE_BROWSER
 }
 
 @Composable
@@ -114,7 +115,8 @@ fun MainNavigation(
                 },
                 onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
                 onNavigateToHistory = { navigateTo(Screen.HISTORY) },
-                onNavigateToSettings = { navigateTo(Screen.SETTINGS) }
+                onNavigateToSettings = { navigateTo(Screen.SETTINGS) },
+                onNavigateToFileBrowser = { navigateTo(Screen.FILE_BROWSER) }
             )
             Screen.SEND -> SendScreen(
                 onNavigateBack = { navigateBack() },
@@ -124,6 +126,7 @@ fun MainNavigation(
                     navigateTo(Screen.WEBDROP)
                 },
                 onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
+                onNavigateToFileBrowser = { navigateTo(Screen.FILE_BROWSER) },
                 initialUris = initialUris,
                 initialNfcPayload = initialNfcPayload
             )
@@ -147,7 +150,15 @@ fun MainNavigation(
             Screen.SETTINGS -> SettingsScreen(
                 onNavigateBack = { navigateBack() }
             )
+            Screen.FILE_BROWSER -> com.astron.app.ui.screens.filebrowser.FileBrowserScreen(
+                onNavigateBack = { navigateBack() },
+                onConfirmSelection = { selected ->
+                    pendingSendItems = selected
+                    navigateTo(Screen.SEND)
+                }
+            )
         }
     }
 }
+
 

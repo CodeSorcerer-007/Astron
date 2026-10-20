@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Close
@@ -93,6 +94,7 @@ fun SendScreen(
     onTransferStarted: () -> Unit,
     onNavigateToWebDrop: (List<TransferItem>) -> Unit,
     onNavigateToLightDrop: () -> Unit,
+    onNavigateToFileBrowser: (() -> Unit)? = null,
     initialUris: List<Uri> = emptyList(),
     initialNfcPayload: com.astron.app.core.nfc.NfcPairingPayload? = null,
     viewModel: SendViewModel = hiltViewModel()
@@ -105,6 +107,7 @@ fun SendScreen(
     var showRadarSheet by remember { mutableStateOf(false) }
     var showAppPickerSheet by remember { mutableStateOf(false) }
     var showDirectQrScanner by remember { mutableStateOf(false) }
+    var previewItem by remember { mutableStateOf<TransferItem?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     LaunchedEffect(initialUris) {
@@ -222,6 +225,66 @@ fun SendScreen(
                 .padding(padding)
                 .padding(horizontal = 20.dp)
         ) {
+            // Built-in God-Tier File Explorer Card
+            if (onNavigateToFileBrowser != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(CosmicCyan.copy(alpha = 0.15f), StellarViolet.copy(alpha = 0.15f))
+                            )
+                        )
+                        .border(1.dp, CosmicCyan.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                        .clickable { onNavigateToFileBrowser() }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(CosmicCyan.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = CosmicCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Built-in File Explorer",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Browse, multi-select & preview videos, docs, apps",
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "Open explorer",
+                        tint = CosmicCyan,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             // Source Selection Trio: Photos, Files, Apps (APK)
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -385,6 +448,7 @@ fun SendScreen(
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(SurfaceLight)
                                 .border(1.dp, BorderLight, RoundedCornerShape(14.dp))
+                                .clickable { previewItem = item }
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -544,4 +608,17 @@ fun SendScreen(
             )
         }
     }
+
+    if (previewItem != null) {
+        com.astron.app.ui.components.FilePreviewSheet(
+            item = previewItem,
+            onDismiss = { previewItem = null },
+            onSelectToggle = { itemToRemove ->
+                viewModel.removeItem(itemToRemove)
+                previewItem = null
+            },
+            isSelected = true
+        )
+    }
 }
+
