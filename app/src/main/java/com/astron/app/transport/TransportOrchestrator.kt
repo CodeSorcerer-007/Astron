@@ -39,7 +39,7 @@ data class TransportScore(
  */
 @Singleton
 class TransportOrchestrator @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
 
     companion object {
@@ -63,9 +63,10 @@ class TransportOrchestrator @Inject constructor(
     fun evaluate(
         fileSizeBytes: Long = 0L,
         preferOffline: Boolean = false,
-        forceType: TransportType? = null
+        forceType: TransportType? = null,
+        capabilitiesOverride: DeviceCapabilities? = null
     ): List<TransportScore> {
-        val caps = CapabilityDetector.refresh(context)
+        val caps = capabilitiesOverride ?: CapabilityDetector.refresh(context)
         Log.d(TAG, "Evaluating transports. Caps: $caps | fileSizeBytes=$fileSizeBytes")
 
         val scores = buildList {
@@ -224,9 +225,12 @@ class TransportOrchestrator @Inject constructor(
      * Returns the recommended fallback transport excluding the given [currentType].
      * Called when a transfer fails mid-session and a transparent switch is needed.
      */
-    fun getFallback(currentType: TransportType): TransportType? {
+    fun getFallback(
+        currentType: TransportType,
+        capabilitiesOverride: DeviceCapabilities? = null
+    ): TransportType? {
         val scores = _allScores.value.ifEmpty {
-            evaluate()
+            evaluate(capabilitiesOverride = capabilitiesOverride)
         }
         return scores
             .filter { it.type != currentType && it.score > 0 }

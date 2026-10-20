@@ -56,7 +56,7 @@ sealed class RelayConnectionState {
 
 @Singleton
 class InternetRelayTransport @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val storageManager: StorageManager
 ) {
     companion object {
