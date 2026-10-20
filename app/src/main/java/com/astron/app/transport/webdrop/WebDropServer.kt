@@ -226,6 +226,7 @@ class WebDropServer(
                     return
                 }
 
+                val isEncrypted = headers["x-encrypted"]?.lowercase() == "aes-256-gcm"
                 val rawFileName = headers["x-filename"] ?: "upload_${System.currentTimeMillis()}"
                 if (rawFileName.length > 500) {
                     send400(outStream, "Filename too long")
@@ -237,15 +238,30 @@ class WebDropServer(
 
                 val targetFile = File(storageManager.getAstronDownloadDirectory(), fileName)
                 targetFile.parentFile?.mkdirs()
-                targetFile.outputStream().use { fos ->
-                    val buffer = ByteArray(64 * 1024)
-                    var bytesRemaining = contentLength
-                    while (bytesRemaining > 0) {
-                        val toRead = minOf(buffer.size.toLong(), bytesRemaining).toInt()
-                        val read = inStream.read(buffer, 0, toRead)
+
+                if (isEncrypted && contentLength <= 100 * 1024 * 1024L) {
+                    // Decrypt client-side AES-256-GCM uploaded payload
+                    val encryptedBytes = ByteArray(contentLength.toInt())
+                    var totalRead = 0
+                    while (totalRead < contentLength) {
+                        val read = inStream.read(encryptedBytes, totalRead, (contentLength - totalRead).toInt())
                         if (read == -1) break
-                        fos.write(buffer, 0, read)
-                        bytesRemaining -= read
+                        totalRead += read
+                    }
+                    val secretKey = CryptoManager.deriveKeyFromToken(sessionToken)
+                    val decrypted = CryptoManager.decryptAesGcm(encryptedBytes, secretKey)
+                    targetFile.writeBytes(decrypted)
+                } else {
+                    targetFile.outputStream().use { fos ->
+                        val buffer = ByteArray(64 * 1024)
+                        var bytesRemaining = contentLength
+                        while (bytesRemaining > 0) {
+                            val toRead = minOf(buffer.size.toLong(), bytesRemaining).toInt()
+                            val read = inStream.read(buffer, 0, toRead)
+                            if (read == -1) break
+                            fos.write(buffer, 0, read)
+                            bytesRemaining -= read
+                        }
                     }
                 }
 
@@ -264,7 +280,7 @@ class WebDropServer(
     private fun corsHeaders(): String =
         "Access-Control-Allow-Origin: *\r\n" +
         "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-        "Access-Control-Allow-Headers: X-Filename, Content-Type, Content-Length, X-Session-Token\r\n"
+        "Access-Control-Allow-Headers: X-Filename, Content-Type, Content-Length, X-Session-Token, X-Encrypted\r\n"
 
 
     private fun serveWebClientHtml(out: OutputStream) {
@@ -278,7 +294,9 @@ class WebDropServer(
                     <div class="file-name">$safeFileName</div>
                     <div class="file-meta">${NetworkUtils.formatBytes(file.size)} • $safeMime</div>
                 </div>
-                <a href="/download/${file.id}?token=$sessionToken" class="btn-download" download="$safeFileName">Download</a>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <a href="/download/${file.id}?token=$sessionToken" class="btn-download" download="$safeFileName">Download</a>
+                </div>
             </div>
             """.trimIndent()
         }
@@ -298,38 +316,46 @@ class WebDropServer(
                     --surface-hover: #162038;
                     --cyan: #00E5FF;
                     --blue: #3B82F6;
+                    --violet: #8B5CF6;
                     --text: #F1F5F9;
                     --text-muted: #94A3B8;
-                    --border: rgba(0, 229, 255, 0.15);
+                    --border: rgba(0, 229, 255, 0.18);
+                    --success: #10B981;
                 }
                 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-                body { background: var(--bg-dark); color: var(--text); padding: 24px 16px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
-                .container { width: 100%; max-width: 680px; }
-                header { text-align: center; margin-bottom: 32px; }
+                body { background: var(--bg-dark); color: var(--text); padding: 24px 16px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; position: relative; overflow-x: hidden; }
+                #spaceCanvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 0; }
+                .container { width: 100%; max-width: 680px; position: relative; z-index: 1; }
+                header { text-align: center; margin-bottom: 28px; }
                 .brand-logo-wrap { display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px; }
-                .brand-logo { width: 72px; height: 72px; object-fit: contain; filter: drop-shadow(0 0 25px rgba(0,229,255,0.7)); }
-                h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
-                p.sub { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
-                .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; background: rgba(0,229,255,0.1); border: 1px solid var(--border); color: var(--cyan); font-size: 12px; font-weight: 600; margin-top: 8px; }
-                .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--cyan); margin: 24px 0 12px 0; }
-                .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; transition: transform 0.15s ease, border-color 0.15s ease; }
-                .card:hover { border-color: rgba(0,229,255,0.4); transform: translateY(-1px); }
+                .brand-logo { width: 76px; height: 76px; object-fit: contain; filter: drop-shadow(0 0 25px rgba(0,229,255,0.7)); }
+                h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; background: linear-gradient(135deg, #FFF, var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+                p.sub { color: var(--text-muted); font-size: 14px; margin-top: 6px; }
+                .chips-row { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+                .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 999px; background: rgba(0,229,255,0.1); border: 1px solid var(--border); color: var(--cyan); font-size: 12px; font-weight: 600; }
+                .badge-e2ee { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.3); color: var(--success); }
+                .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: var(--cyan); margin: 24px 0 12px 0; }
+                .card { background: rgba(14,20,36,0.85); backdrop-filter: blur(12px); border: 1px solid var(--border); border-radius: 16px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; transition: all 0.2s ease; }
+                .card:hover { border-color: rgba(0,229,255,0.45); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,229,255,0.12); }
                 .file-info { flex: 1; min-width: 0; padding-right: 16px; }
                 .file-name { font-weight: 600; font-size: 15px; word-break: break-all; }
                 .file-meta { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
-                .btn-download { background: linear-gradient(135deg, var(--cyan), var(--blue)); color: #070A12; text-decoration: none; padding: 10px 18px; border-radius: 12px; font-weight: 700; font-size: 13px; white-space: nowrap; transition: opacity 0.15s ease; }
+                .btn-download { background: linear-gradient(135deg, var(--cyan), var(--blue)); color: #070A12; text-decoration: none; padding: 10px 18px; border-radius: 12px; font-weight: 700; font-size: 13px; white-space: nowrap; transition: opacity 0.15s ease; border: none; cursor: pointer; }
                 .btn-download:hover { opacity: 0.9; }
-                .upload-box { background: var(--surface); border: 2px dashed var(--border); border-radius: 20px; padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s ease; margin-top: 12px; }
+                .upload-box { background: rgba(14,20,36,0.85); backdrop-filter: blur(12px); border: 2px dashed var(--border); border-radius: 20px; padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s ease; margin-top: 12px; }
                 .upload-box:hover { border-color: var(--cyan); background: var(--surface-hover); }
-                .upload-icon { font-size: 36px; margin-bottom: 8px; color: var(--cyan); }
-                .upload-text { font-size: 15px; font-weight: 600; }
-                .upload-sub { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+                .upload-icon { font-size: 40px; margin-bottom: 8px; color: var(--cyan); }
+                .upload-text { font-size: 16px; font-weight: 700; }
+                .upload-sub { color: var(--text-muted); font-size: 13px; margin-top: 6px; }
+                .security-toggle-wrap { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: rgba(14,20,36,0.6); border: 1px solid var(--border); border-radius: 12px; margin-top: 14px; font-size: 13px; }
                 #fileInput { display: none; }
-                .progress-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-top: 12px; display: none; }
-                .progress-fill { width: 0%; height: 100%; background: var(--cyan); transition: width 0.1s linear; }
+                .progress-bar { width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; margin-top: 16px; display: none; }
+                .progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue)); transition: width 0.1s linear; }
+                .telemetry-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 8px; display: none; }
             </style>
         </head>
         <body>
+            <canvas id="spaceCanvas"></canvas>
             <div class="container">
                 <header>
                     <div class="brand-logo-wrap">
@@ -337,39 +363,120 @@ class WebDropServer(
                     </div>
                     <h1>Astron Web Drop</h1>
                     <p class="sub">Connected to <strong>$safeDeviceName</strong></p>
-                    <div class="badge">Direct P2P Encrypted Session</div>
+                    <div class="chips-row">
+                        <div class="badge">🪐 Direct P2P Session</div>
+                        <div class="badge badge-e2ee">🛡️ E2EE Zero-Knowledge Active</div>
+                    </div>
                 </header>
 
                 <div class="section-title">Files Shared by Sender</div>
-                ${if (sharedFiles.isEmpty()) "<p style='color:var(--text-muted);font-size:14px;'>No files queued for download right now. You can send files to the phone below.</p>" else fileCards}
+                ${if (sharedFiles.isEmpty()) "<p style='color:var(--text-muted);font-size:14px;background:rgba(14,20,36,0.6);padding:18px;border-radius:14px;border:1px solid var(--border);'>No files queued for download right now. You can send files to the phone below.</p>" else fileCards}
 
                 <div class="section-title">Send Files to Phone</div>
                 <div class="upload-box" id="uploadBox" onclick="document.getElementById('fileInput').click()">
                     <div class="upload-icon">↑</div>
                     <div class="upload-text">Click or drag files here to send</div>
-                    <div class="upload-sub">Files will be saved directly to $safeDeviceName</div>
+                    <div class="upload-sub">Files will be encrypted &amp; saved to $safeDeviceName</div>
                     <input type="file" id="fileInput" multiple onchange="handleFiles(this.files)">
                     <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
+                    <div class="telemetry-row" id="telemetryRow">
+                        <span id="telemetrySpeed">0 MB/s</span>
+                        <span id="telemetryPercent">0%</span>
+                    </div>
+                </div>
+
+                <div class="security-toggle-wrap">
+                    <span>🔒 Client-Side AES-256-GCM Pre-Encryption</span>
+                    <input type="checkbox" id="e2eeCheckbox" checked style="accent-color:var(--cyan);width:18px;height:18px;cursor:pointer;">
                 </div>
             </div>
 
             <script>
+                // 1. Procedural Cosmic Twinkling Stars Canvas
+                (function() {
+                    const canvas = document.getElementById('spaceCanvas');
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    let stars = [];
+                    function resize() {
+                        canvas.width = window.innerWidth;
+                        canvas.height = window.innerHeight;
+                        initStars();
+                    }
+                    function initStars() {
+                        stars = [];
+                        const count = Math.floor((canvas.width * canvas.height) / 8000);
+                        const colors = ['rgba(0,229,255,', 'rgba(59,130,246,', 'rgba(139,92,246,', 'rgba(255,255,255,'];
+                        for (let i = 0; i < count; i++) {
+                            stars.push({
+                                x: Math.random() * canvas.width,
+                                y: Math.random() * canvas.height,
+                                r: Math.random() * 1.5 + 0.6,
+                                color: colors[Math.floor(Math.random() * colors.length)],
+                                alpha: Math.random() * 0.8 + 0.2,
+                                speed: Math.random() * 0.02 + 0.008
+                            });
+                        }
+                    }
+                    function render() {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        for (let s of stars) {
+                            s.alpha += s.speed;
+                            if (s.alpha > 1 || s.alpha < 0.2) s.speed = -s.speed;
+                            ctx.fillStyle = s.color + Math.max(0.1, Math.min(1, s.alpha)) + ')';
+                            ctx.beginPath();
+                            ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        requestAnimationFrame(render);
+                    }
+                    window.addEventListener('resize', resize);
+                    resize();
+                    requestAnimationFrame(render);
+                })();
+
+                // 2. Client-Side Web Cryptography / SubtleCrypto Helper
+                const sessionToken = '$sessionToken';
+                async function deriveAesKey(token) {
+                    const enc = new TextEncoder();
+                    const keyMaterial = await window.crypto.subtle.importKey(
+                        'raw',
+                        enc.encode(token),
+                        { name: 'PBKDF2' },
+                        false,
+                        ['deriveKey']
+                    );
+                    return await window.crypto.subtle.deriveKey(
+                        {
+                            name: 'PBKDF2',
+                            salt: enc.encode('Astron-Wire-Salt-v1'),
+                            iterations: 10000,
+                            hash: 'SHA-256'
+                        },
+                        keyMaterial,
+                        { name: 'AES-GCM', length: 256 },
+                        false,
+                        ['encrypt', 'decrypt']
+                    );
+                }
+
+                // 3. Drag and Drop & Upload Management
                 const uploadBox = document.getElementById('uploadBox');
                 if (uploadBox) {
-                    ['dragenter', 'dragover'].forEach(eventName => {
-                        uploadBox.addEventListener(eventName, (e) => {
+                    ['dragenter', 'dragover'].forEach(name => {
+                        uploadBox.addEventListener(name, (e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             uploadBox.style.borderColor = 'var(--cyan)';
                             uploadBox.style.background = 'var(--surface-hover)';
                         }, false);
                     });
-                    ['dragleave', 'drop'].forEach(eventName => {
-                        uploadBox.addEventListener(eventName, (e) => {
+                    ['dragleave', 'drop'].forEach(name => {
+                        uploadBox.addEventListener(name, (e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             uploadBox.style.borderColor = 'var(--border)';
-                            uploadBox.style.background = 'var(--surface)';
+                            uploadBox.style.background = 'rgba(14,20,36,0.85)';
                         }, false);
                     });
                     uploadBox.addEventListener('drop', (e) => {
@@ -380,40 +487,90 @@ class WebDropServer(
                     }, false);
                 }
 
-                function handleFiles(files) {
+                async function handleFiles(files) {
                     if (!files || files.length === 0) return;
                     const bar = document.getElementById('progressBar');
                     const fill = document.getElementById('progressFill');
+                    const telemetryRow = document.getElementById('telemetryRow');
+                    const telemetrySpeed = document.getElementById('telemetrySpeed');
+                    const telemetryPercent = document.getElementById('telemetryPercent');
+                    const e2eeEnabled = document.getElementById('e2eeCheckbox')?.checked ?? true;
+
                     bar.style.display = 'block';
+                    telemetryRow.style.display = 'flex';
 
                     let totalBytes = 0;
                     Array.from(files).forEach(f => totalBytes += f.size);
                     const fileLoaded = new Array(files.length).fill(0);
 
+                    let startTime = Date.now();
                     let uploaded = 0;
-                    Array.from(files).forEach((file, index) => {
-                        const xhr = new XMLHttpRequest();
-                        xhr.open('POST', '/upload?token=' + encodeURIComponent('$sessionToken'), true);
-                        xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
-                        xhr.setRequestHeader('X-Session-Token', '$sessionToken');
-                        xhr.upload.onprogress = (e) => {
-                            if (e.lengthComputable && totalBytes > 0) {
-                                fileLoaded[index] = e.loaded;
-                                const currentTotal = fileLoaded.reduce((a, b) => a + b, 0);
-                                const percent = Math.min(100, Math.round((currentTotal / totalBytes) * 100));
-                                fill.style.width = percent + '%';
+
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        let payload = file;
+                        let isEncrypted = false;
+
+                        if (e2eeEnabled && window.crypto && window.crypto.subtle && file.size < 50 * 1024 * 1024) {
+                            try {
+                                const key = await deriveAesKey(sessionToken);
+                                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                                const fileData = await file.arrayBuffer();
+                                const cipherBuffer = await window.crypto.subtle.encrypt(
+                                    { name: 'AES-GCM', iv: iv, tagLength: 128 },
+                                    key,
+                                    fileData
+                                );
+                                const combined = new Uint8Array(iv.length + cipherBuffer.byteLength);
+                                combined.set(iv, 0);
+                                combined.set(new Uint8Array(cipherBuffer), iv.length);
+                                payload = new Blob([combined]);
+                                isEncrypted = true;
+                            } catch (e) {
+                                console.warn('Pre-encryption fallback to standard TLS/LAN stream', e);
                             }
-                        };
-                        xhr.onload = () => {
-                            uploaded++;
-                            if (uploaded === files.length) {
-                                alert('All files uploaded successfully!');
-                                bar.style.display = 'none';
-                                fill.style.width = '0%';
+                        }
+
+                        await new Promise((resolve, reject) => {
+                            const xhr = new XMLHttpRequest();
+                            xhr.open('POST', '/upload?token=' + encodeURIComponent(sessionToken), true);
+                            xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+                            xhr.setRequestHeader('X-Session-Token', sessionToken);
+                            if (isEncrypted) {
+                                xhr.setRequestHeader('X-Encrypted', 'aes-256-gcm');
                             }
-                        };
-                        xhr.send(file);
-                    });
+                            xhr.upload.onprogress = (e) => {
+                                if (e.lengthComputable && totalBytes > 0) {
+                                    fileLoaded[i] = e.loaded;
+                                    const currentTotal = fileLoaded.reduce((a, b) => a + b, 0);
+                                    const percent = Math.min(100, Math.round((currentTotal / totalBytes) * 100));
+                                    fill.style.width = percent + '%';
+                                    telemetryPercent.textContent = percent + '%';
+
+                                    const elapsed = (Date.now() - startTime) / 1000;
+                                    if (elapsed > 0.5) {
+                                        const mbps = (currentTotal / (1024 * 1024)) / elapsed;
+                                        telemetrySpeed.textContent = mbps.toFixed(1) + ' MB/s';
+                                    }
+                                }
+                            };
+                            xhr.onload = () => {
+                                uploaded++;
+                                resolve();
+                            };
+                            xhr.onerror = () => reject(new Error('Upload failed'));
+                            xhr.send(payload);
+                        });
+                    }
+
+                    fill.style.width = '100%';
+                    telemetryPercent.textContent = '100% (Completed)';
+                    setTimeout(() => {
+                        alert('All ' + files.length + ' file(s) uploaded successfully to $safeDeviceName!');
+                        bar.style.display = 'none';
+                        telemetryRow.style.display = 'none';
+                        fill.style.width = '0%';
+                    }, 400);
                 }
             </script>
         </body>

@@ -153,4 +153,39 @@ class TransportOrchestratorTest {
         val fallback = orchestrator.getFallback(TransportType.LOCAL_WIFI, capabilitiesOverride = caps)
         assertEquals(TransportType.WIFI_DIRECT, fallback)
     }
+
+    @Test
+    fun testWifi7MloBoostsLocalWifiAndSpeed() {
+        val caps = DeviceCapabilities(
+            hasLocalNetwork = true,
+            isWifiConnected = true,
+            hasWifi = true,
+            isWifiEnabled = true,
+            isWifi7Supported = true,
+            hasWifiMlo = true
+        )
+
+        val scores = orchestrator.evaluate(capabilitiesOverride = caps)
+        val wifiScore = scores.first { it.type == TransportType.LOCAL_WIFI }
+
+        assertEquals(98, wifiScore.score)
+        assertEquals(250f, wifiScore.estimatedSpeedMbps, 0.01f)
+        assertTrue(wifiScore.reason.contains("Multi-Link Operation"))
+    }
+
+    @Test
+    fun testWifiAwareNanScoring() {
+        val caps = DeviceCapabilities(
+            hasWifiAware = true,
+            hasWifi = true,
+            isWifiEnabled = true
+        )
+
+        val scores = orchestrator.evaluate(capabilitiesOverride = caps)
+        val awareScore = scores.first { it.type == TransportType.WIFI_AWARE }
+
+        assertEquals(88, awareScore.score)
+        assertEquals(45f, awareScore.estimatedSpeedMbps, 0.01f)
+        assertTrue(awareScore.reason.contains("Wi-Fi Aware"))
+    }
 }

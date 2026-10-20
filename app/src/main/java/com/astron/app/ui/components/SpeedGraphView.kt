@@ -55,6 +55,7 @@ fun SpeedGraphView(
     val avgSpeedBps = if (speedSamples.isNotEmpty()) speedSamples.average().toLong() else 0L
 
     val lineColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
     val gradientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
     val transparentColor = Color.Transparent
 
@@ -132,42 +133,62 @@ fun SpeedGraphView(
                         points.add(Offset(x, y))
                     }
 
-                    // 1. Draw gradient fill below path
+                    // 1. Build smooth cubic Bézier curve path
+                    val curvePath = Path().apply {
+                        moveTo(points.first().x, points.first().y)
+                        for (i in 0 until points.size - 1) {
+                            val p0 = points[i]
+                            val p1 = points[i + 1]
+                            val cpX = (p0.x + p1.x) / 2f
+                            cubicTo(cpX, p0.y, cpX, p1.y, p1.x, p1.y)
+                        }
+                    }
+
+                    // 2. Draw gradient fill below cubic Bézier curve
                     val fillPath = Path().apply {
-                        moveTo(points.first().x, height)
-                        points.forEach { lineTo(it.x, it.y) }
+                        addPath(curvePath)
                         lineTo(points.last().x, height)
+                        lineTo(points.first().x, height)
                         close()
                     }
 
                     drawPath(
                         path = fillPath,
                         brush = Brush.verticalGradient(
-                            colors = listOf(gradientColor, transparentColor),
+                            colors = listOf(
+                                lineColor.copy(alpha = 0.35f),
+                                secondaryColor.copy(alpha = 0.12f),
+                                Color.Transparent
+                            ),
                             startY = 0f,
                             endY = height
                         )
                     )
 
-                    // 2. Draw stroke line
-                    val strokePath = Path().apply {
-                        moveTo(points.first().x, points.first().y)
-                        for (i in 1 until points.size) {
-                            lineTo(points[i].x, points[i].y)
-                        }
-                    }
-
+                    // 3. Draw ambient glow behind line
                     drawPath(
-                        path = strokePath,
-                        color = lineColor,
-                        style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                        path = curvePath,
+                        color = lineColor.copy(alpha = 0.3f),
+                        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
                     )
 
-                    // 3. Draw pulsing head dot
+                    // 4. Draw crisp main curve line
+                    drawPath(
+                        path = curvePath,
+                        color = lineColor,
+                        style = Stroke(width = 2.5f.dp.toPx(), cap = StrokeCap.Round)
+                    )
+
+                    // 5. Draw glowing outer halo and bright core at head dot
                     val head = points.last()
                     drawCircle(
-                        color = lineColor,
-                        radius = 4.dp.toPx(),
+                        color = lineColor.copy(alpha = 0.35f),
+                        radius = 8.dp.toPx(),
+                        center = head
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 3.5f.dp.toPx(),
                         center = head
                     )
                 }

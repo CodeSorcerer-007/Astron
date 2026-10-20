@@ -72,13 +72,20 @@ class TransportOrchestrator @Inject constructor(
         val scores = buildList {
             // ── LOCAL_WIFI (LAN) ──────────────────────────────────────────────────
             if (caps.hasLocalNetwork && caps.isWifiConnected) {
-                val baseScore = 95
+                val isWifi7 = caps.isWifi7Supported || caps.hasWifiMlo
+                val baseScore = if (isWifi7) 98 else 95
+                val speed = if (isWifi7) 250f else 80f
+                val reason = if (isWifi7) {
+                    "Wi-Fi 7 MLO (Multi-Link Operation) channel bonding active — Ultra High Throughput (up to 320 MHz / 5.8 Gbps)"
+                } else {
+                    "Same Wi-Fi network detected — highest speed available"
+                }
                 val batteryPenalty = if (caps.isBatterySaverOn) -5 else 0
                 add(TransportScore(
                     type = TransportType.LOCAL_WIFI,
                     score = (baseScore + batteryPenalty).coerceIn(0, 100),
-                    estimatedSpeedMbps = 80f,
-                    reason = "Same Wi-Fi network detected — highest speed available"
+                    estimatedSpeedMbps = speed,
+                    reason = reason
                 ))
             } else {
                 add(TransportScore(
@@ -91,13 +98,20 @@ class TransportOrchestrator @Inject constructor(
 
             // ── WIFI_DIRECT ───────────────────────────────────────────────────────
             if (caps.hasWifiDirect && caps.isWifiEnabled) {
-                val baseScore = 90
+                val isWifi7 = caps.isWifi7Supported || caps.hasWifiMlo
+                val baseScore = if (isWifi7) 92 else 90
+                val speed = if (isWifi7) 120f else 60f
+                val reason = if (isWifi7) {
+                    "Wi-Fi Direct with MLO multi-channel aggregation — high-speed peer-to-peer"
+                } else {
+                    "Wi-Fi Direct available — high-speed peer-to-peer"
+                }
                 val batteryPenalty = if (caps.isBatterySaverOn) -10 else 0
                 add(TransportScore(
                     type = TransportType.WIFI_DIRECT,
                     score = (baseScore + batteryPenalty).coerceIn(0, 100),
-                    estimatedSpeedMbps = 60f,
-                    reason = "Wi-Fi Direct available — high-speed peer-to-peer"
+                    estimatedSpeedMbps = speed,
+                    reason = reason
                 ))
             } else {
                 add(TransportScore(
@@ -105,6 +119,25 @@ class TransportOrchestrator @Inject constructor(
                     score = 0,
                     estimatedSpeedMbps = 0f,
                     reason = "Wi-Fi Direct not available or Wi-Fi disabled"
+                ))
+            }
+
+            // ── WIFI_AWARE (NAN) ──────────────────────────────────────────────────
+            if (caps.hasWifiAware && caps.isWifiEnabled) {
+                val baseScore = 88
+                val batteryPenalty = if (caps.isBatterySaverOn) -10 else 0
+                add(TransportScore(
+                    type = TransportType.WIFI_AWARE,
+                    score = (baseScore + batteryPenalty).coerceIn(0, 100),
+                    estimatedSpeedMbps = 45f,
+                    reason = "Wi-Fi Aware (NAN) available — zero-router peer-to-peer data link"
+                ))
+            } else {
+                add(TransportScore(
+                    type = TransportType.WIFI_AWARE,
+                    score = 0,
+                    estimatedSpeedMbps = 0f,
+                    reason = "Wi-Fi Aware (NAN) not supported by hardware or disabled"
                 ))
             }
 

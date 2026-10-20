@@ -66,14 +66,49 @@ fun CosmicStarfield(
         val width = size.width
         val height = size.height
 
+        // 1. Soft deep-space nebula aura
+        drawCircle(
+            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                colors = listOf(
+                    StellarViolet.copy(alpha = 0.08f),
+                    ElectricBlue.copy(alpha = 0.04f),
+                    Color.Transparent
+                ),
+                center = Offset(width * 0.35f, height * 0.25f),
+                radius = maxOf(width, height) * 0.65f
+            ),
+            radius = maxOf(width, height) * 0.65f,
+            center = Offset(width * 0.35f, height * 0.25f)
+        )
+
+        // 2. Stars and diffraction spikes
         for (star in stars) {
             val center = Offset(star.xPercent * width, star.yPercent * height)
-            val dynamicAlpha = ((twinklePulse + star.phaseOffset) % 1f).coerceIn(0.2f, 0.9f)
+            val dynamicAlpha = ((twinklePulse + star.phaseOffset) % 1f).coerceIn(0.2f, 0.95f)
+            val finalColor = star.color.copy(alpha = star.color.alpha * dynamicAlpha)
+
             drawCircle(
-                color = star.color.copy(alpha = star.color.alpha * dynamicAlpha),
+                color = finalColor,
                 radius = star.radius,
                 center = center
             )
+
+            // Diffraction flare for prominent stars
+            if (star.radius > 2.0f && dynamicAlpha > 0.6f) {
+                val flareLen = star.radius * 3.5f
+                drawLine(
+                    color = finalColor.copy(alpha = finalColor.alpha * 0.45f),
+                    start = Offset(center.x - flareLen, center.y),
+                    end = Offset(center.x + flareLen, center.y),
+                    strokeWidth = 1f
+                )
+                drawLine(
+                    color = finalColor.copy(alpha = finalColor.alpha * 0.45f),
+                    start = Offset(center.x, center.y - flareLen),
+                    end = Offset(center.x, center.y + flareLen),
+                    strokeWidth = 1f
+                )
+            }
         }
     }
 }

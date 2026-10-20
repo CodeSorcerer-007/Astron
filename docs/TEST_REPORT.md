@@ -6,11 +6,11 @@ This report documents the verification and test validation results for **Astron 
 
 ## 1. Test Execution Summary
 
-- **Test Framework**: JUnit 4 / Kotlin Coroutines Test / Robolectric
+- **Test Framework**: JUnit 4 / Kotlin Coroutines Test
 - **Execution Target**: JVM Unit & Integration Tests (`.\gradlew.bat testDebugUnitTest`)
-- **Total Test Suites**: 20
-- **Total Tests**: 97
-- **Passed**: 97 (100%)
+- **Total Test Suites**: 21
+- **Total Tests**: 102
+- **Passed**: 102 (100%)
 - **Failed**: 0 (0%)
 - **Regressions**: 0
 

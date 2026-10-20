@@ -18,6 +18,8 @@ data class DeviceCapabilities(
     val hasWifi: Boolean = false,
     val hasWifiDirect: Boolean = false,
     val hasWifiAware: Boolean = false,
+    val isWifi7Supported: Boolean = false,
+    val hasWifiMlo: Boolean = false,
     val hasBluetooth: Boolean = false,
     val hasBluetoothClassic: Boolean = false,
     val hasBle: Boolean = false,
@@ -59,6 +61,8 @@ object CapabilityDetector {
             hasWifiAware = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 hasFeature(context, PackageManager.FEATURE_WIFI_AWARE)
             } else false,
+            isWifi7Supported = isWifi7Supported(context),
+            hasWifiMlo = hasWifiMlo(context),
             hasBluetooth = hasFeature(context, PackageManager.FEATURE_BLUETOOTH),
             hasBluetoothClassic = hasFeature(context, PackageManager.FEATURE_BLUETOOTH),
             hasBle = hasFeature(context, PackageManager.FEATURE_BLUETOOTH_LE),
@@ -82,6 +86,28 @@ object CapabilityDetector {
         context.packageManager.hasSystemFeature(feature)
     } catch (e: Throwable) {
         Log.w(TAG, "Error checking feature $feature", e)
+        false
+    }
+
+    private fun isWifi7Supported(context: Context): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val method = wm?.javaClass?.getMethod("isWifiStandardSupported", Int::class.javaPrimitiveType)
+            (method?.invoke(wm, 8) as? Boolean) ?: false
+        } else false
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun hasWifiMlo(context: Context): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val method = wm?.javaClass?.getMethod("is6GhzBandSupported")
+            val is6Ghz = (method?.invoke(wm) as? Boolean) ?: false
+            val isWifi7 = isWifi7Supported(context)
+            isWifi7 || (is6Ghz && Build.VERSION.SDK_INT >= 34)
+        } else false
+    } catch (e: Throwable) {
         false
     }
 
