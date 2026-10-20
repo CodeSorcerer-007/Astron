@@ -110,27 +110,12 @@ fun AstronLogoHeader(
                     )
             )
 
-            // Inner Logo Container
-            Box(
-                modifier = Modifier
-                    .size(if (compact) 60.dp else 92.dp)
-                    .clip(RoundedCornerShape(if (compact) 16.dp else 24.dp))
-                    .background(SpaceDark)
-                    .border(
-                        width = 1.dp,
-                        brush = Brush.linearGradient(
-                            listOf(CosmicCyan.copy(alpha = 0.5f), ElectricBlue.copy(alpha = 0.2f))
-                        ),
-                        shape = RoundedCornerShape(if (compact) 16.dp else 24.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.astron_logo),
-                    contentDescription = "Astron Logo",
-                    modifier = Modifier.size(if (compact) 52.dp else 80.dp)
-                )
-            }
+            // Central Brand Logo
+            Image(
+                painter = painterResource(id = R.drawable.astron_logo),
+                contentDescription = "Astron Logo",
+                modifier = Modifier.size(if (compact) 60.dp else 92.dp)
+            )
         }
 
         if (!compact) {
