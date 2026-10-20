@@ -1,16 +1,27 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Monochrome Orbital glow arc -->
+    <!-- Planetary Orbital Ellipse -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M26,62 C34,44 74,40 82,54 C88,64 70,72 54,72 C38,72 24,66 26,62 Z"
+        android:pathData="M24,56 C28,40 80,38 84,54 C87,66 70,72 54,72 C36,72 22,66 24,56 Z"
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2.5"
         android:strokeLineCap="round" />
+    
+    <!-- Left Orbiting Moon Sphere -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M24,42 C26.2,42 28,43.8 28,46 C28,48.2 26.2,50 24,50 C21.8,50 20,48.2 20,46 C20,43.8 21.8,42 24,42 Z" />
+
+    <!-- Right Orbiting Moon Sphere -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M84,60 C86.2,60 88,61.8 88,64 C88,66.2 86.2,68 84,68 C81.8,68 80,66.2 80,64 C80,61.8 81.8,60 84,60 Z" />
+
     <!-- Stellar 'A' Left Beam -->
     <path
         android:fillColor="#00000000"
@@ -18,6 +29,7 @@
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="5"
         android:strokeLineCap="round" />
+
     <!-- Stellar 'A' Right Beam -->
     <path
         android:fillColor="#00000000"
@@ -25,13 +37,12 @@
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="5"
         android:strokeLineCap="round" />
-    <!-- Central Beam Crossbar -->
+
+    <!-- Central Diamond Star Core -->
     <path
-        android:fillColor="#00000000"
-        android:pathData="M40,58 L68,58"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="3.5"
-        android:strokeLineCap="round" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,46 L56,52 L62,54 L56,56 L54,62 L52,56 L46,54 L52,52 Z" />
+
     <!-- Apex Core Beacon -->
     <path
         android:fillColor="#FFFFFFFF"

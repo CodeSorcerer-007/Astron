@@ -57,6 +57,20 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideHapticFeedbackManager(
+        @ApplicationContext context: Context
+    ): com.astron.app.core.util.HapticFeedbackManager =
+        com.astron.app.core.util.HapticFeedbackManager(context)
+
+    @Provides
+    @Singleton
+    fun provideWifiDirectManager(
+        @ApplicationContext context: Context
+    ): com.astron.app.transport.p2p.WifiDirectManager =
+        com.astron.app.transport.p2p.WifiDirectManager(context)
+
+    @Provides
+    @Singleton
     fun provideTransferEngine(
         @ApplicationContext context: Context,
         storageManager: StorageManager,

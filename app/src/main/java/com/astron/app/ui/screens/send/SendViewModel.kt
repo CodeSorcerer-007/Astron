@@ -64,6 +64,10 @@ class SendViewModel @Inject constructor(
         transferEngine.stopPeerDiscovery()
     }
 
+    fun handleNfcPeer(peer: PeerDevice) {
+        transferEngine.registerDiscoveredPeer(peer)
+    }
+
     fun sendToPeer(peer: PeerDevice, onTransferStarted: () -> Unit) {
         val items = _selectedItems.value
         if (items.isEmpty()) return

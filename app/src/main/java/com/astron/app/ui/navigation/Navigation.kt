@@ -39,7 +39,8 @@ enum class Screen {
 
 @Composable
 fun MainNavigation(
-    initialUris: List<Uri> = emptyList()
+    initialUris: List<Uri> = emptyList(),
+    initialNfcPayload: com.astron.app.core.nfc.NfcPairingPayload? = null
 ) {
     val backStack = rememberSaveable(
         saver = listSaver(
@@ -54,7 +55,7 @@ fun MainNavigation(
         )
     ) {
         mutableStateListOf<Screen>().apply {
-            if (initialUris.isNotEmpty()) {
+            if (initialUris.isNotEmpty() || initialNfcPayload != null) {
                 add(Screen.HOME)
                 add(Screen.SEND)
             } else {
@@ -89,6 +90,12 @@ fun MainNavigation(
         navigateBack()
     }
 
+    androidx.compose.runtime.LaunchedEffect(initialNfcPayload) {
+        if (initialNfcPayload != null && currentScreen != Screen.SEND && currentScreen != Screen.TRANSFER) {
+            navigateTo(Screen.SEND)
+        }
+    }
+
     AnimatedContent(
         targetState = currentScreen,
         transitionSpec = {
@@ -117,7 +124,8 @@ fun MainNavigation(
                     navigateTo(Screen.WEBDROP)
                 },
                 onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
-                initialUris = initialUris
+                initialUris = initialUris,
+                initialNfcPayload = initialNfcPayload
             )
             Screen.RECEIVE -> ReceiveScreen(
                 onNavigateBack = { navigateBack() },

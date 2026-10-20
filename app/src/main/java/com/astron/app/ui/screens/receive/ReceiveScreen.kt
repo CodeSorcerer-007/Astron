@@ -1,5 +1,6 @@
 package com.astron.app.ui.screens.receive
 
+import android.app.Activity
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -38,11 +39,18 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.platform.LocalContext
+import com.astron.app.core.nfc.NfcManager
+import com.astron.app.core.nfc.NfcPairingPayload
+import com.astron.app.core.util.HapticFeedbackManager
+import com.astron.app.core.util.NetworkUtils
+import com.astron.app.core.util.PairingUtils
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,12 +87,34 @@ fun ReceiveScreen(
     val isHotspotMode by viewModel.isHotspotMode.collectAsState()
     val hotspotConfig by viewModel.hotspotConfig.collectAsState()
 
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val hapticManager = remember { HapticFeedbackManager(context) }
+
     LaunchedEffect(Unit) {
         viewModel.startReceiver()
     }
 
+    LaunchedEffect(qrBitmap, isHotspotMode, hotspotConfig) {
+        if (activity != null) {
+            val config = hotspotConfig
+            val name = deviceName.ifBlank { NetworkUtils.getDefaultDeviceName() }
+            val nfcPayload = NfcPairingPayload(
+                deviceName = name,
+                hostIp = if (isHotspotMode && config != null) config.ipAddress else (viewModel.localIp ?: "127.0.0.1"),
+                port = PairingUtils.DEFAULT_PORT,
+                sessionToken = "",
+                transportType = if (isHotspotMode) "HOTSPOT" else "LAN",
+                hotspotSsid = if (isHotspotMode) config?.ssid else null,
+                hotspotPass = if (isHotspotMode) config?.passphrase else null
+            )
+            NfcManager.setupNdefPush(activity, nfcPayload)
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            activity?.let { NfcManager.clearNdefPush(it) }
             viewModel.stopReceiver()
         }
     }
@@ -277,6 +307,15 @@ fun ReceiveScreen(
                             fontSize = 11.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(top = 2.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "📱 NFC Tap-to-Pair Active • Hold phones back-to-back",
+                            color = CosmicCyan.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }

@@ -28,7 +28,11 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var preferencesRepository: PreferencesRepository
 
+    @Inject
+    lateinit var hapticManager: com.astron.app.core.util.HapticFeedbackManager
+
     private val _sharedUris = mutableStateOf<List<Uri>>(emptyList())
+    private val _nfcPayload = mutableStateOf<com.astron.app.core.nfc.NfcPairingPayload?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +43,11 @@ class MainActivity : ComponentActivity() {
         }
 
         _sharedUris.value = extractSharedUris(intent)
+        val nfc = com.astron.app.core.nfc.NfcManager.parseIntent(intent)
+        if (nfc != null) {
+            hapticManager.heavyClick()
+            _nfcPayload.value = nfc
+        }
 
         setContent {
             val isDark by preferencesRepository.darkModeFlow.collectAsState(initial = false)
@@ -48,7 +57,8 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val uris by remember { _sharedUris }
-                    MainNavigation(initialUris = uris)
+                    val nfcData by remember { _nfcPayload }
+                    MainNavigation(initialUris = uris, initialNfcPayload = nfcData)
                 }
             }
         }
@@ -60,6 +70,11 @@ class MainActivity : ComponentActivity() {
         val uris = extractSharedUris(intent)
         if (uris.isNotEmpty()) {
             _sharedUris.value = uris
+        }
+        val nfc = com.astron.app.core.nfc.NfcManager.parseIntent(intent)
+        if (nfc != null) {
+            hapticManager.heavyClick()
+            _nfcPayload.value = nfc
         }
     }
 

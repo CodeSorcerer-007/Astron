@@ -1,7 +1,13 @@
 package com.astron.app.ui.screens.transfer
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,14 +42,17 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.astron.app.core.model.SessionState
+import com.astron.app.core.util.HapticFeedbackManager
 import com.astron.app.core.util.NetworkUtils
 import com.astron.app.ui.components.CosmicStarfield
 import com.astron.app.ui.theme.BorderLight
@@ -71,6 +81,8 @@ fun TransferScreen(
     viewModel: TransferViewModel = hiltViewModel()
 ) {
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val hapticEngine = remember(context) { HapticFeedbackManager(context) }
     val currentSession by viewModel.session.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
     val hapticsEnabled by viewModel.hapticsEnabled.collectAsState()
@@ -92,6 +104,18 @@ fun TransferScreen(
     val isFailed = state == SessionState.FAILED
     val isCancelled = state == SessionState.CANCELLED
     val isTerminal = isCompleted || isFailed || isCancelled
+
+    LaunchedEffect(isCompleted) {
+        if (isCompleted && hapticsEnabled) {
+            hapticEngine.success()
+        }
+    }
+
+    LaunchedEffect(isFailed) {
+        if (isFailed && hapticsEnabled) {
+            hapticEngine.error()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(CanvasLight)) {
         CosmicStarfield(starCount = 35)
@@ -213,8 +237,61 @@ fun TransferScreen(
         // Large Holographic Transfer Progress Display
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(200.dp)
+            modifier = Modifier.size(240.dp)
         ) {
+            if (isCompleted) {
+                val celebrationTransition = rememberInfiniteTransition(label = "celebrationRipples")
+                val rippleScale by celebrationTransition.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 1.25f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1600, easing = LinearOutSlowInEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "rippleScale"
+                )
+                val rippleAlpha by celebrationTransition.animateFloat(
+                    initialValue = 0.5f,
+                    targetValue = 0f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1600, easing = LinearOutSlowInEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "rippleAlpha"
+                )
+                val rippleScale2 by celebrationTransition.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 1.15f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1600, delayMillis = 400, easing = LinearOutSlowInEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "rippleScale2"
+                )
+                val rippleAlpha2 by celebrationTransition.animateFloat(
+                    initialValue = 0.35f,
+                    targetValue = 0f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1600, delayMillis = 400, easing = LinearOutSlowInEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "rippleAlpha2"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(190.dp * rippleScale)
+                        .clip(CircleShape)
+                        .border(2.dp, EmeraldVerified.copy(alpha = rippleAlpha), CircleShape)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(190.dp * rippleScale2)
+                        .clip(CircleShape)
+                        .border(1.5.dp, EmeraldVerified.copy(alpha = rippleAlpha2), CircleShape)
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .size(190.dp)

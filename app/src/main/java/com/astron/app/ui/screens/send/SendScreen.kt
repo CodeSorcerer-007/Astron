@@ -94,13 +94,10 @@ fun SendScreen(
     onNavigateToWebDrop: (List<TransferItem>) -> Unit,
     onNavigateToLightDrop: () -> Unit,
     initialUris: List<Uri> = emptyList(),
+    initialNfcPayload: com.astron.app.core.nfc.NfcPairingPayload? = null,
     viewModel: SendViewModel = hiltViewModel()
 ) {
     val haptic = LocalHapticFeedback.current
-
-    LaunchedEffect(initialUris) {
-        viewModel.initializeWithUris(initialUris)
-    }
 
     val selectedItems by viewModel.selectedItems.collectAsState()
     val discoveredPeers by viewModel.discoveredPeers.collectAsState()
@@ -109,6 +106,18 @@ fun SendScreen(
     var showAppPickerSheet by remember { mutableStateOf(false) }
     var showDirectQrScanner by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    LaunchedEffect(initialUris) {
+        viewModel.initializeWithUris(initialUris)
+    }
+
+    LaunchedEffect(initialNfcPayload) {
+        if (initialNfcPayload != null) {
+            val peer = initialNfcPayload.toPeerDevice()
+            viewModel.handleNfcPeer(peer)
+            showRadarSheet = true
+        }
+    }
 
     // Document/File Picker
     val filePickerLauncher = rememberLauncherForActivityResult(

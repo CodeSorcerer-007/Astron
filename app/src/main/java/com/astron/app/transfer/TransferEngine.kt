@@ -137,6 +137,16 @@ class TransferEngine(
     }
 
     /**
+     * Registers a known peer discovered via NFC tap-to-pair, QR scan, or Wi-Fi Direct.
+     */
+    fun registerDiscoveredPeer(peer: PeerDevice) {
+        _discoveredPeers.update { current ->
+            val filtered = current.filter { it.id != peer.id && it.hostAddress != peer.hostAddress }
+            listOf(peer) + filtered
+        }
+    }
+
+    /**
      * SENDER: Initiates transfer of selected items to target peer device.
      */
     fun startSendTransfer(peer: PeerDevice, items: List<TransferItem>) {
