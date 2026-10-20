@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.astron.app.core.model.TransferManifest
 import com.astron.app.core.model.TransferSession
 import com.astron.app.core.util.NetworkUtils
+import com.astron.app.core.util.PairingUtils
 import com.astron.app.core.util.QrCodeGenerator
 import com.astron.app.data.PreferencesRepository
 import com.astron.app.transfer.TransferEngine
+import com.astron.app.transport.hotspot.HotspotConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.net.URLEncoder
 import javax.inject.Inject
 
 @HiltViewModel
@@ -43,13 +44,27 @@ class ReceiveViewModel @Inject constructor(
     private val _qrBitmap = MutableStateFlow<Bitmap?>(null)
     val qrBitmap: StateFlow<Bitmap?> = _qrBitmap.asStateFlow()
 
+    private val _isHotspotMode = MutableStateFlow(false)
+    val isHotspotMode: StateFlow<Boolean> = _isHotspotMode.asStateFlow()
+
+    val hotspotConfig: StateFlow<HotspotConfig?> = transferEngine.hotspotManager.hotspotConfig
+
     val localIp: String?
-        get() = NetworkUtils.getLocalIpAddress()
+        get() = if (_isHotspotMode.value) {
+            hotspotConfig.value?.ipAddress ?: "192.168.43.1"
+        } else {
+            NetworkUtils.getLocalIpAddress()
+        }
 
     init {
         generateQr()
         viewModelScope.launch {
             deviceName.collect {
+                generateQr()
+            }
+        }
+        viewModelScope.launch {
+            hotspotConfig.collect {
                 generateQr()
             }
         }
@@ -69,11 +84,45 @@ class ReceiveViewModel @Inject constructor(
         generateQr()
     }
 
+    fun toggleHotspotMode() {
+        val next = !_isHotspotMode.value
+        _isHotspotMode.value = next
+        if (next) {
+            transferEngine.hotspotManager.startLocalHotspot(
+                onStarted = {
+                    generateQr()
+                },
+                onFailed = {
+                    _isHotspotMode.value = false
+                    generateQr()
+                }
+            )
+        } else {
+            transferEngine.hotspotManager.stopLocalHotspot()
+            generateQr()
+        }
+    }
+
     fun generateQr() {
         val name = deviceName.value.ifBlank { NetworkUtils.getDefaultDeviceName() }
         val ip = localIp ?: "127.0.0.1"
-        val encodedName = try { URLEncoder.encode(name, "UTF-8") } catch (_: Exception) { name }
-        val payload = "astron://pair?name=$encodedName&ip=$ip&port=52737"
+        val config = hotspotConfig.value
+
+        val payload = if (_isHotspotMode.value && config != null) {
+            PairingUtils.createPairingQr(
+                name = name,
+                ip = config.ipAddress,
+                port = PairingUtils.DEFAULT_PORT,
+                hotspotSsid = config.ssid,
+                hotspotPass = config.passphrase
+            )
+        } else {
+            PairingUtils.createPairingQr(
+                name = name,
+                ip = ip,
+                port = PairingUtils.DEFAULT_PORT
+            )
+        }
         _qrBitmap.value = QrCodeGenerator.generateQrBitmap(payload, size = 320)
     }
 
@@ -93,6 +142,10 @@ class ReceiveViewModel @Inject constructor(
         transferEngine.cancelTransfer()
         transferEngine.lanTransport.stopAdvertising()
         transferEngine.lanTransport.stopReceiverServer()
+        if (_isHotspotMode.value) {
+            transferEngine.hotspotManager.stopLocalHotspot()
+            _isHotspotMode.value = false
+        }
     }
 
     override fun onCleared() {

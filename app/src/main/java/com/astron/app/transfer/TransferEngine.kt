@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
 import java.io.Closeable
 import kotlinx.coroutines.cancel
 import java.io.File
+import com.astron.app.core.util.SoundFeedbackManager
+import com.astron.app.transport.hotspot.HotspotManager
 import java.util.UUID
 
 class TransferEngine(
@@ -41,7 +43,9 @@ class TransferEngine(
     val historyRepository: HistoryRepository,
     val lanTransport: LanTransport = LanTransport(context, storageManager),
     val webDropServer: WebDropServer = WebDropServer(context, storageManager),
-    val lightDropManager: LightDropManager = LightDropManager()
+    val lightDropManager: LightDropManager = LightDropManager(),
+    val soundFeedbackManager: SoundFeedbackManager = SoundFeedbackManager(),
+    val hotspotManager: HotspotManager = HotspotManager(context)
 ) : Closeable {
     companion object {
         const val TAG = "TransferEngine"
@@ -54,6 +58,8 @@ class TransferEngine(
 
     override fun close() {
         activeJob?.cancel()
+        soundFeedbackManager.close()
+        hotspotManager.close()
         scope.cancel()
     }
 
@@ -175,10 +181,12 @@ class TransferEngine(
             TransferForegroundService.start(context, peer.name)
 
             val priority = preferencesRepository.transferPriorityFlow.first()
+            val soundEnabled = preferencesRepository.soundEnabledFlow.first()
             val startTime = System.currentTimeMillis()
             resetSpeedTracking()
 
             _currentSession.update { it?.copy(state = SessionState.TRANSFERRING) }
+            soundFeedbackManager.playTransferStart(soundEnabled)
 
             val success = lanTransport.sendFiles(
                 peer = peer,
@@ -208,6 +216,7 @@ class TransferEngine(
             TransferForegroundService.stop(context)
 
             if (success) {
+                soundFeedbackManager.playTransferComplete(soundEnabled)
                 _currentSession.update {
                     it?.copy(
                         state = SessionState.COMPLETED,
@@ -297,6 +306,10 @@ class TransferEngine(
                     }
 
                     val autoAccept = preferencesRepository.autoAcceptTrustedFlow.first()
+                    val soundEnabled = preferencesRepository.soundEnabledFlow.first()
+                    if (!autoAccept) {
+                        soundFeedbackManager.playIncomingAlert(soundEnabled)
+                    }
                     val approved = if (autoAccept) {
                         true
                     } else {
@@ -307,6 +320,7 @@ class TransferEngine(
                         resetSpeedTracking()
                         _currentSession.update { it?.copy(state = SessionState.TRANSFERRING) }
                         TransferForegroundService.start(context, manifest.senderDeviceName)
+                        soundFeedbackManager.playTransferStart(soundEnabled)
                     } else {
                         _currentSession.update { it?.copy(state = SessionState.CANCELLED) }
                     }
@@ -324,9 +338,16 @@ class TransferEngine(
                                 item.copy(status = if (isVerified) ItemStatus.COMPLETED else ItemStatus.FAILED)
                             } else item
                         }
+                        val nextCount = current.verifiedFilesCount + (if (isVerified) 1 else 0)
+                        if (nextCount == current.items.size && current.items.isNotEmpty()) {
+                            scope.launch {
+                                val soundEnabled = preferencesRepository.soundEnabledFlow.first()
+                                soundFeedbackManager.playTransferComplete(soundEnabled)
+                            }
+                        }
                         current.copy(
                             items = updatedItems,
-                            verifiedFilesCount = current.verifiedFilesCount + (if (isVerified) 1 else 0)
+                            verifiedFilesCount = nextCount
                         )
                     }
                 },

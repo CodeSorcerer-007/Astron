@@ -1,4 +1,4 @@
-﻿package com.astron.app.data
+package com.astron.app.data
 
 import android.content.Context
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
@@ -26,6 +26,8 @@ class PreferencesRepository(private val context: Context) {
     private val KEY_AUTO_ACCEPT_TRUSTED = booleanPreferencesKey("auto_accept_trusted")
     private val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
     private val KEY_DARK_MODE = booleanPreferencesKey("dark_mode")
+
+    private val KEY_SOUND_ENABLED = booleanPreferencesKey("sound_enabled")
 
     val deviceNameFlow: Flow<String> = context.dataStore.data
         .catch { exception ->
@@ -64,6 +66,14 @@ class PreferencesRepository(private val context: Context) {
             prefs[KEY_HAPTICS_ENABLED] ?: true
         }
 
+    val soundEnabledFlow: Flow<Boolean> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { prefs ->
+            prefs[KEY_SOUND_ENABLED] ?: true
+        }
+
     val darkModeFlow: Flow<Boolean> = context.dataStore.data
         .catch { exception ->
             if (exception is IOException) emit(emptyPreferences()) else throw exception
@@ -93,6 +103,12 @@ class PreferencesRepository(private val context: Context) {
     suspend fun setHapticsEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_HAPTICS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setSoundEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SOUND_ENABLED] = enabled
         }
     }
 

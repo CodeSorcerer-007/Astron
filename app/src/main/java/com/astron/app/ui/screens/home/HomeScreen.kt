@@ -79,6 +79,7 @@ import com.astron.app.core.util.AppFileManager
 import com.astron.app.core.util.NetworkUtils
 import com.astron.app.ui.components.AppPickerSheet
 import com.astron.app.ui.components.AstronLogoHeader
+import com.astron.app.ui.components.CosmicStarfield
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
@@ -115,6 +116,7 @@ fun HomeScreen(
     val latestFile by viewModel.latestReceivedFile.collectAsState()
 
     var showAppPickerSheet by remember { mutableStateOf(false) }
+    var showDiagnosticsSheet by remember { mutableStateOf(false) }
 
     val permissionsState = rememberMultiplePermissionsState(
         permissions = PermissionManager.getRequiredPermissions()
@@ -131,36 +133,38 @@ fun HomeScreen(
     val usedStorageRatio = if (totalStorage > 0) (usedStorage.toFloat() / totalStorage).coerceIn(0f, 1f) else 0f
     val animatedStorageProgress by animateFloatAsState(targetValue = usedStorageRatio, label = "storageProgress")
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CanvasLight)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // TOP BAR: Device Identity Pill & Quick System Actions
-        Row(
+    Box(modifier = Modifier.fillMaxSize().background(CanvasLight)) {
+        CosmicStarfield(starCount = 40)
+
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Device Identity Pill
+            // TOP BAR: Device Identity Pill & Quick System Actions
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(SurfaceLight)
-                    .border(1.dp, BorderLight, RoundedCornerShape(999.dp))
-                    .clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onNavigateToSettings()
-                    }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Device Identity Pill (Opens Diagnostics)
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(SurfaceLight)
+                        .border(1.dp, BorderLight, RoundedCornerShape(999.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showDiagnosticsSheet = true
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 Box(
                     modifier = Modifier
                         .size(8.dp)
@@ -808,14 +812,110 @@ fun HomeScreen(
                         try { context.startActivity(intent) } catch (_: Throwable) {}
                         showPermissionSheet = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceHover),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Open App Settings", fontSize = 13.sp)
+                    Text("Open System Settings", color = TextPrimary, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
+
+    // Diagnostics & Network Telemetry Bottom Sheet
+    if (showDiagnosticsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showDiagnosticsSheet = false },
+            containerColor = SurfaceLight,
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Telemetry & Diagnostics",
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (localIp != null) EmeraldVerified.copy(alpha = 0.12f) else CrimsonError.copy(alpha = 0.12f))
+                            .border(1.dp, if (localIp != null) EmeraldVerified.copy(alpha = 0.3f) else CrimsonError.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (localIp != null) "Online" else "Offline",
+                            color = if (localIp != null) EmeraldVerified else CrimsonError,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                DiagnosticItem("Device Identity", "$deviceName (${android.os.Build.MODEL})")
+                DiagnosticItem("Local IPv4 Address", localIp ?: "No active Wi-Fi interface")
+                DiagnosticItem("LAN Socket Port", "TCP 52737 (Framed Binary Stream)")
+                DiagnosticItem("Web Drop Server", if (localIp != null) "http://$localIp:8080" else "Offline")
+                DiagnosticItem("P2P Hotspot Mode", "Local-Only SoftAP Ready")
+                DiagnosticItem("Parallel Streams", "Multi-Socket Engine (up to 3x)")
+                DiagnosticItem("Encryption Core", "AES-256-GCM • HKDF-SHA256")
+                DiagnosticItem("Storage Remaining", "${NetworkUtils.formatBytes(freeStorage)} free of ${NetworkUtils.formatBytes(totalStorage)}")
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        showDiagnosticsSheet = false
+                        onNavigateToSettings()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CosmicCyan),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Manage App Settings", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
 }
+}
+
+@Composable
+private fun DiagnosticItem(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, color = TextSecondary, fontSize = 12.sp)
+        Text(
+            text = value,
+            color = TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+

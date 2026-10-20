@@ -16,6 +16,9 @@ object PermissionManager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms.add(Manifest.permission.POST_NOTIFICATIONS)
             perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        } else {
+            @Suppress("DEPRECATION")
+            perms.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
         perms.add(Manifest.permission.CAMERA)
         return perms
@@ -26,6 +29,34 @@ object PermissionManager {
      */
     fun hasPermission(context: Context, permission: String): Boolean {
         return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * Checks if camera permission is granted.
+     */
+    fun hasCameraPermission(context: Context): Boolean =
+        hasPermission(context, Manifest.permission.CAMERA)
+
+    /**
+     * Checks if notification permission is granted.
+     */
+    fun hasNotificationPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            hasPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Checks if nearby Wi-Fi / LAN permission is granted.
+     */
+    fun hasNearbyWifiPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            hasPermission(context, Manifest.permission.NEARBY_WIFI_DEVICES)
+        } else {
+            true
+        }
     }
 
     /**

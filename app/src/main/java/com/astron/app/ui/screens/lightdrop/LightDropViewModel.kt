@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.astron.app.core.storage.StorageManager
 import com.astron.app.transport.lightdrop.LightDropManager
+import com.astron.app.transport.lightdrop.OpticalDensity
 import com.astron.app.transport.lightdrop.OpticalFrame
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -29,6 +30,9 @@ class LightDropViewModel @Inject constructor(
     private val _fps = MutableStateFlow(12f)
     val fps: StateFlow<Float> = _fps.asStateFlow()
 
+    private val _density = MutableStateFlow(OpticalDensity.BALANCED)
+    val density: StateFlow<OpticalDensity> = _density.asStateFlow()
+
     private val _frames = MutableStateFlow<List<OpticalFrame>>(emptyList())
     val frames: StateFlow<List<OpticalFrame>> = _frames.asStateFlow()
 
@@ -50,6 +54,7 @@ class LightDropViewModel @Inject constructor(
     private val _completedFile = MutableStateFlow<File?>(null)
     val completedFile: StateFlow<File?> = _completedFile.asStateFlow()
 
+    private var currentActiveFile: File? = null
     private var transmitJob: Job? = null
 
     init {
@@ -64,9 +69,20 @@ class LightDropViewModel @Inject constructor(
         _fps.value = newFps
     }
 
+    fun setDensity(newDensity: OpticalDensity) {
+        _density.value = newDensity
+        val file = currentActiveFile
+        if (file != null) {
+            prepareFile(file)
+        } else {
+            prepareDemoData()
+        }
+    }
+
     fun prepareDemoData() {
+        currentActiveFile = null
         val demoPayload = "Astron Optical LightDrop — Ultra-secure air-gapped zero-radio transfer protocol. SHA-256 verified.".toByteArray()
-        val generatedFrames = lightDropManager.encodeBytesToFrames(demoPayload)
+        val generatedFrames = lightDropManager.encodeBytesToFrames(demoPayload, density = _density.value)
         _frames.value = generatedFrames
         _currentFrameIndex.value = 0
         if (generatedFrames.isNotEmpty()) {
@@ -76,7 +92,8 @@ class LightDropViewModel @Inject constructor(
 
     fun prepareFile(file: File) {
         try {
-            val generatedFrames = lightDropManager.encodeFileToFrames(file)
+            currentActiveFile = file
+            val generatedFrames = lightDropManager.encodeFileToFrames(file, density = _density.value)
             _frames.value = generatedFrames
             _currentFrameIndex.value = 0
             if (generatedFrames.isNotEmpty()) {
@@ -120,16 +137,23 @@ class LightDropViewModel @Inject constructor(
         }
     }
 
+    fun getMissingFrames(): List<Int> {
+        val total = _totalFramesExpected.value
+        if (total <= 0) return emptyList()
+        val received = _receivedFrames.value.keys
+        return (0 until total).filter { !received.contains(it) }
+    }
+
     private fun assembleReceivedFile() {
         try {
-        val sortedFrames = _receivedFrames.value.values.sortedBy { it.frameIndex }
-        val target = File(storageManager.getAstronDownloadDirectory(), "lightdrop_${System.currentTimeMillis()}.bin")
-        target.outputStream().use { fos ->
-            for (f in sortedFrames) {
-                fos.write(f.payload)
+            val sortedFrames = _receivedFrames.value.values.sortedBy { it.frameIndex }
+            val target = File(storageManager.getAstronDownloadDirectory(), "lightdrop_${System.currentTimeMillis()}.bin")
+            target.outputStream().use { fos ->
+                for (f in sortedFrames) {
+                    fos.write(f.payload)
+                }
             }
-        }
-        _completedFile.value = target
+            _completedFile.value = target
         } catch (t: Throwable) {
             android.util.Log.e("LightDropVM", "Failed assembling optical frames", t)
         }

@@ -26,8 +26,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +49,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,11 +60,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.astron.app.transport.lightdrop.OpticalDensity
 import com.astron.app.ui.components.CameraQrScanner
+import com.astron.app.ui.components.CosmicStarfield
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
 import com.astron.app.ui.theme.EmeraldVerified
+import com.astron.app.ui.theme.SolarGold
 import com.astron.app.ui.theme.StellarViolet
 import com.astron.app.ui.theme.SurfaceHover
 import com.astron.app.ui.theme.SurfaceLight
@@ -100,45 +106,52 @@ fun LightDropScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Tab Selector
-            PrimaryTabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = SurfaceLight,
-                contentColor = CosmicCyan,
+            CosmicStarfield(starCount = 35)
+
+            Column(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { viewModel.selectTab(0) },
-                    text = { Text("Transmit (Screen)", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-                    icon = { Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = "Transmit screen mode", modifier = Modifier.size(18.dp)) }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { viewModel.selectTab(1) },
-                    text = { Text("Receive (Camera)", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-                    icon = { Icon(Icons.Default.CameraAlt, contentDescription = "Receive camera mode", modifier = Modifier.size(18.dp)) }
-                )
-            }
+                // Tab Selector
+                PrimaryTabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = SurfaceLight,
+                    contentColor = CosmicCyan,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                ) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { viewModel.selectTab(0) },
+                        text = { Text("Transmit (Screen)", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+                        icon = { Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = "Transmit screen mode", modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { viewModel.selectTab(1) },
+                        text = { Text("Receive (Camera)", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+                        icon = { Icon(Icons.Default.CameraAlt, contentDescription = "Receive camera mode", modifier = Modifier.size(18.dp)) }
+                    )
+                }
 
-            Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-            if (selectedTab == 0) {
-                TransmitOpticalView(viewModel)
-            } else {
-                if (!cameraPermissionState.status.isGranted) {
-                    CameraPermissionGate(onRequestPermission = { cameraPermissionState.launchPermissionRequest() })
+                if (selectedTab == 0) {
+                    TransmitOpticalView(viewModel)
                 } else {
-                    ReceiveOpticalView(viewModel)
+                    if (!cameraPermissionState.status.isGranted) {
+                        CameraPermissionGate(onRequestPermission = { cameraPermissionState.launchPermissionRequest() })
+                    } else {
+                        ReceiveOpticalView(viewModel)
+                    }
                 }
             }
         }
@@ -201,7 +214,7 @@ fun TransmitOpticalView(viewModel: LightDropViewModel) {
     val currentFrameIndex by viewModel.currentFrameIndex.collectAsState()
     val currentBitmap by viewModel.currentFrameBitmap.collectAsState()
     val fps by viewModel.fps.collectAsState()
-    val isTransmitting by viewModel.isTransmitting.collectAsState()
+    val density by viewModel.density.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.prepareDemoData()
@@ -225,19 +238,19 @@ fun TransmitOpticalView(viewModel: LightDropViewModel) {
                 .padding(horizontal = 14.dp, vertical = 6.dp)
         ) {
             Text(
-                text = "ZERO-RADIO MODE • AIR-GAPPED",
+                text = "ZERO-RADIO MODE • AIR-GAPPED OPTICAL STREAM",
                 color = StellarViolet,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Animated Frame QR Display
         Box(
             modifier = Modifier
-                .size(240.dp)
+                .size(220.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .background(Color.White)
                 .border(1.5.dp, BorderLight, RoundedCornerShape(20.dp))
@@ -255,24 +268,85 @@ fun TransmitOpticalView(viewModel: LightDropViewModel) {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Text(
             text = "Frame ${currentFrameIndex + 1} of ${frames.size.coerceAtLeast(1)}",
             color = TextPrimary,
-            fontSize = 16.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
         Text(
-            text = "Point receiver camera at this screen to transfer",
+            text = "Point receiver camera at this screen to capture frames",
             color = TextSecondary,
-            fontSize = 12.sp
+            fontSize = 11.sp
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Density Selector Chips
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(SurfaceLight)
+                .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                .padding(12.dp)
+        ) {
+            Text(
+                text = "Optical Density (${density.chunkSize} B/frame)",
+                color = TextPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OpticalDensity.entries.forEach { optDensity ->
+                    val isSelected = optDensity == density
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (isSelected) CosmicCyan.copy(alpha = 0.16f) else SurfaceHover
+                            )
+                            .border(
+                                width = if (isSelected) 1.5.dp else 0.dp,
+                                color = if (isSelected) CosmicCyan else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable { viewModel.setDensity(optDensity) }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = when (optDensity) {
+                                OpticalDensity.RESILIENT -> "128B"
+                                OpticalDensity.BALANCED -> "256B"
+                                OpticalDensity.ULTRA -> "512B"
+                            },
+                            color = if (isSelected) CosmicCyan else TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = density.description,
+                color = TextSecondary,
+                fontSize = 10.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Frame rate slider
         Column(
@@ -281,14 +355,14 @@ fun TransmitOpticalView(viewModel: LightDropViewModel) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(SurfaceLight)
                 .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
-                .padding(16.dp)
+                .padding(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Transmission Speed", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Text("${fps.toInt()} FPS", color = CosmicCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Transmission Speed", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("${fps.toInt()} FPS", color = CosmicCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Slider(
                 value = fps,
@@ -309,6 +383,7 @@ fun ReceiveOpticalView(viewModel: LightDropViewModel) {
     val receivedFrames by viewModel.receivedFrames.collectAsState()
     val totalExpected by viewModel.totalFramesExpected.collectAsState()
     val completedFile by viewModel.completedFile.collectAsState()
+    val missingFrames = remember(receivedFrames, totalExpected) { viewModel.getMissingFrames() }
 
     val progress = if (totalExpected > 0) {
         (receivedFrames.size.toFloat() / totalExpected).coerceIn(0f, 1f)
@@ -372,12 +447,12 @@ fun ReceiveOpticalView(viewModel: LightDropViewModel) {
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(290.dp),
+                    .height(260.dp),
                 scanOverlayColor = CosmicCyan
             )
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Decoded Frames Status
         Box(
@@ -386,12 +461,13 @@ fun ReceiveOpticalView(viewModel: LightDropViewModel) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(SurfaceLight)
                 .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
-                .padding(18.dp)
+                .padding(16.dp)
         ) {
             Column {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Optical Reassembly",
@@ -421,8 +497,51 @@ fun ReceiveOpticalView(viewModel: LightDropViewModel) {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                if (totalExpected > 0) {
+                    if (missingFrames.isEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = EmeraldVerified,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "All frames captured • SHA-256 verified",
+                                color = EmeraldVerified,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = null,
+                                tint = SolarGold,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            val missingStr = missingFrames.take(4).map { "#$it" }.joinToString(", ")
+                            val suffix = if (missingFrames.size > 4) " +${missingFrames.size - 4} more" else ""
+                            Text(
+                                text = "Missing ${missingFrames.size} frames ($missingStr$suffix)",
+                                color = SolarGold,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+
                 Text(
-                    text = "Screen-to-Camera optical stream automatically decodes frames and verifies integrity with SHA-256.",
+                    text = "Screen-to-Camera optical stream automatically decodes frames and verifies integrity with CRC32 & SHA-256.",
                     color = TextSecondary,
                     fontSize = 11.sp
                 )

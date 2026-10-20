@@ -45,6 +45,13 @@ class SettingsViewModel @Inject constructor(
             initialValue = true
         )
 
+    val soundEnabled: StateFlow<Boolean> = preferencesRepository.soundEnabledFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true
+        )
+
     val darkMode: StateFlow<Boolean> = preferencesRepository.darkModeFlow
         .stateIn(
             scope = viewModelScope,
@@ -73,6 +80,12 @@ class SettingsViewModel @Inject constructor(
     fun setHapticsEnabled(enabled: Boolean) {
         viewModelScope.launch {
             preferencesRepository.setHapticsEnabled(enabled)
+        }
+    }
+
+    fun setSoundEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.setSoundEnabled(enabled)
         }
     }
 

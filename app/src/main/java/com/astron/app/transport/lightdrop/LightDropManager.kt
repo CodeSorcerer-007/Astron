@@ -24,6 +24,12 @@ internal object Base64Compat {
     }
 }
 
+enum class OpticalDensity(val chunkSize: Int, val displayName: String, val description: String) {
+    RESILIENT(128, "Resilient (128B)", "Maximum scanning stability for motion or low-light"),
+    BALANCED(256, "Balanced (256B)", "Optimal speed and scanning reliability"),
+    ULTRA(512, "Ultra-Dense (512B)", "Maximum throughput for high-resolution cameras")
+}
+
 data class OpticalFrame(
     val sessionId: Int,
     val frameIndex: Int,
@@ -46,23 +52,29 @@ class LightDropManager {
         const val TAG = "LightDropManager"
         const val MAGIC = 0x4153544C // 'ASTL' in ASCII
         const val PROTOCOL_VERSION: Byte = 1
-        const val CHUNK_PAYLOAD_SIZE = 256 // 256 bytes per frame for ultra-fast, robust camera recognition
+        const val DEFAULT_PAYLOAD_SIZE = 256 // Default 256 bytes
         const val MAX_OPTICAL_FILE_SIZE = 5L * 1024 * 1024 // 5 MB max for optical transfer
     }
 
     /**
-     * SENDER: Streams a file into sequenced OpticalFrames with CRC32 checksums without buffering full file into memory.
+     * SENDER: Streams a file into sequenced OpticalFrames with CRC32 checksums,
+     * supporting adaptive density (128B, 256B, 512B) without buffering full file into memory.
      */
-    fun encodeFileToFrames(file: File, sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt()): List<OpticalFrame> {
+    fun encodeFileToFrames(
+        file: File,
+        sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt(),
+        density: OpticalDensity = OpticalDensity.BALANCED
+    ): List<OpticalFrame> {
         require(file.length() <= MAX_OPTICAL_FILE_SIZE) {
             "File size (${file.length()} bytes) exceeds optical transfer limit (${MAX_OPTICAL_FILE_SIZE / (1024 * 1024)} MB)"
         }
+        val chunkSize = density.chunkSize
         val fileSize = file.length()
-        val totalFrames = ((fileSize + CHUNK_PAYLOAD_SIZE - 1) / CHUNK_PAYLOAD_SIZE).toInt().coerceAtLeast(1)
+        val totalFrames = ((fileSize + chunkSize - 1) / chunkSize).toInt().coerceAtLeast(1)
         val frames = mutableListOf<OpticalFrame>()
 
         file.inputStream().buffered().use { stream ->
-            val buffer = ByteArray(CHUNK_PAYLOAD_SIZE)
+            val buffer = ByteArray(chunkSize)
             var frameIndex = 0
             var bytesRead: Int
             while (stream.read(buffer).also { bytesRead = it } != -1) {
@@ -93,13 +105,18 @@ class LightDropManager {
         return frames
     }
 
-    fun encodeBytesToFrames(bytes: ByteArray, sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt()): List<OpticalFrame> {
-        val totalFrames = ((bytes.size + CHUNK_PAYLOAD_SIZE - 1) / CHUNK_PAYLOAD_SIZE).coerceAtLeast(1)
+    fun encodeBytesToFrames(
+        bytes: ByteArray,
+        sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt(),
+        density: OpticalDensity = OpticalDensity.BALANCED
+    ): List<OpticalFrame> {
+        val chunkSize = density.chunkSize
+        val totalFrames = ((bytes.size + chunkSize - 1) / chunkSize).coerceAtLeast(1)
         val frames = mutableListOf<OpticalFrame>()
 
         for (i in 0 until totalFrames) {
-            val start = i * CHUNK_PAYLOAD_SIZE
-            val end = minOf(start + CHUNK_PAYLOAD_SIZE, bytes.size)
+            val start = i * chunkSize
+            val end = minOf(start + chunkSize, bytes.size)
             val chunkPayload = bytes.copyOfRange(start, end)
 
             val crc = CRC32()
@@ -169,7 +186,8 @@ class LightDropManager {
     }
 
     /**
-     * RECEIVER: Accumulator session that collects incoming frames, deduplicates, and reconstructs the completed file.
+     * RECEIVER: Accumulator session that collects incoming frames, deduplicates,
+     * tracks missing frames, and reconstructs the completed file.
      */
     class ReceiverSession(val sessionId: Int, val totalFrames: Int) {
         private val collectedFrames = mutableMapOf<Int, ByteArray>()
@@ -187,6 +205,12 @@ class LightDropManager {
 
         val receivedCount: Int
             get() = collectedFrames.size
+
+        fun getMissingFrameIndices(): List<Int> {
+            return (0 until totalFrames).filter { !collectedFrames.containsKey(it) }
+        }
+
+        fun getReceivedFrameIndices(): Set<Int> = collectedFrames.keys.toSet()
 
         fun reconstructBytes(): ByteArray {
             val bos = ByteArrayOutputStream()

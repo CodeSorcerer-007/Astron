@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.astron.app.core.model.SessionState
 import com.astron.app.core.util.NetworkUtils
+import com.astron.app.ui.components.CosmicStarfield
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
@@ -92,14 +93,16 @@ fun TransferScreen(
     val isCancelled = state == SessionState.CANCELLED
     val isTerminal = isCompleted || isFailed || isCancelled
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CanvasLight)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(CanvasLight)) {
+        CosmicStarfield(starCount = 35)
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
         // Top status badge & cancel button
         Row(
             modifier = Modifier
@@ -472,5 +475,6 @@ fun TransferScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 }

@@ -12,18 +12,22 @@ Astron adheres to clean architectural separation with distinct layers:
 ┌────────────────────────────────────────────────────────┐
 │                   UI & Presentation                     │
 │   (Jetpack Compose, Material 3, Navigation Compose)    │
+│   - CosmicStarfield Canvas Background                  │
+│   - Network & Storage Diagnostics Modal Sheet          │
 └───────────────────────────▲────────────────────────────┘
                             │ StateFlow / Events
 ┌───────────────────────────┴────────────────────────────┐
 │                    Transfer Engine                     │
 │    (State Machine, Progress EMA, Foreground Service)   │
+│    (SoundFeedbackManager Synthesized Audio Feedback)   │
 └───────────────▲────────────────────────▲───────────────┘
                 │                        │
 ┌───────────────┴───────────────┐ ┌──────┴───────────────┐
 │       Transport Layer         │ │     Storage & SAF    │
-│  - LanTransport (NSD + TCP)   │ │  - Downloads/Astron  │
-│  - WebDropServer (HTTP)       │ │  - Streaming I/O     │
-│  - LightDropManager (Optical) │ │  - Chunked Resume    │
+│  - LanTransport (Multi-Stream)│ │  - Downloads/Astron  │
+│  - HotspotManager (Zero-Router│ │  - Streaming I/O     │
+│  - WebDropServer (HTTP Micro) │ │  - Chunked Resume    │
+│  - LightDropManager (Optical) │ │                      │
 └───────────────▲───────────────┘ └──────▲───────────────┘
                 │                        │
 ┌───────────────┴────────────────────────┴───────────────┐
@@ -38,73 +42,80 @@ Astron adheres to clean architectural separation with distinct layers:
 ## 2. Module Boundaries & Responsibilities
 
 ### 2.1 Core Layer (`com.astron.app.core`)
-- **`model/Models.kt`**: Domain contracts. Defines `TransferItem`, `TransferManifest`, `ManifestItem`, `PeerDevice`, `TransportType`, `TransferSession`, `TransferPriority`, and `TransferHistoryRecord`.
+- **`model/Models.kt`**: Domain contracts. Defines `TransferItem`, `TransferManifest`, `ManifestItem`, `PeerDevice` (with optional hotspot credentials), `TransportType`, `TransferSession`, `TransferPriority`, and `TransferHistoryRecord`.
 - **`security/CryptoManager.kt`**:
-  - Provides authenticated AES-256-GCM symmetric encryption and decryption.
-  - Implements bounded hardware-accelerated SHA-256 streaming hashing via `MessageDigest`.
-  - Enforces `sanitizeFilename(name)` to strip directory traversal sequences (`../`, null bytes, control chars, and reserved OS characters).
-  - Generates secure ephemeral pairing tokens and one-time transfer keys.
+  - Authenticated AES-256-GCM symmetric encryption and decryption.
+  - Hardware-accelerated SHA-256 streaming hashing via `MessageDigest`.
+  - `sanitizeFilename(name)` path traversal defense stripping directory jumps (`../`), null bytes, control chars, and reserved OS symbols.
+  - Ephemeral 32-character high-entropy pairing token generation.
 - **`storage/StorageManager.kt`**:
-  - Resolves URIs via Android Storage Access Framework (`ContentResolver`).
-  - Manages target directory resolution in `Downloads/Astron`.
-  - Implements `RandomAccessFile` chunked I/O allowing seamless resume from arbitrary byte offsets.
-  - Safely renames temp files (`.astron_tmp`) only after cryptographic validation passes.
-- **`util/NetworkUtils.kt` & `QrCodeGenerator.kt`**:
-  - Discovers local active IPv4 addresses across Wi-Fi and hotspot interfaces.
-  - Generates crisp QR code bitmaps via ZXing for pairing and Web Drop URLs.
-  - Formats bytes, ETA, and transfer speeds with human readability.
+  - Android Storage Access Framework (`ContentResolver`) URI resolution.
+  - Target directory management in `Downloads/Astron`.
+  - `RandomAccessFile` chunked I/O supporting seamless resume from arbitrary byte offsets.
+  - Atomic rename of temporary files (`.astron_tmp`) only after SHA-256 checksum verification succeeds.
+- **`util/`**:
+  - `NetworkUtils.kt`: Discovers local active IPv4 addresses across Wi-Fi and SoftAP hotspot interfaces.
+  - `PairingUtils.kt`: Generates and parses unified `astron://pair` QR codes and standard `WIFI:S:..;P:..;;` format.
+  - `SoundFeedbackManager.kt`: Hardware-synthesized tone chimes for Transfer Start, Incoming Alerts, and Verified Completion.
+  - `QrCodeGenerator.kt`: High-contrast QR bitmaps via ZXing.
+
+---
 
 ### 2.2 Transport Layer (`com.astron.app.transport`)
-- **`lan/LanTransport.kt`**:
-  - **Discovery**: Zero-configuration discovery using `NsdManager` advertising and discovering service `_astron._tcp.` on port 8989.
-  - **Socket Server/Client**: Low-overhead TCP streaming socket communication. Reads and writes length-prefixed manifest JSON followed by chunked binary file streams.
-  - **Progress Callbacks**: Emits byte counters to transfer engine every chunk.
-- **`webdrop/WebDropServer.kt`**:
-  - Micro HTTP server running on port 8080.
-  - Serves an embedded cosmic dark-mode single-page application (SPA) with responsive drag-and-drop file upload and download list.
-  - Streams files using chunked HTTP transfer encoding, enabling zero-app downloads and uploads from any browser.
-- **`lightdrop/LightDropManager.kt`**:
-  - Air-gapped, zero-radio transfer pipeline.
-  - Segments data into discrete frames (`ASTL:1:<sessionId>:<index>:<total>:<crc32>:<base64>`).
-  - Transmits visual frames at configurable framerates (10-25 FPS) for optical reception via camera preview scanning.
+
+- **`lan/LanTransport.kt` (Multi-Stream TCP)**:
+  - **Discovery**: Zero-configuration discovery using `NsdManager` advertising `_astron._tcp.` on port `52737`.
+  - **Multi-Stream Socket Acceleration**: When `TransferPriority.MAX_SPEED` is enabled and multiple files are queued, spawns up to **3 parallel TCP sockets** with `sessionToken` authorization, saturating high-bandwidth 5 GHz/6 GHz channels up to 80+ MB/s.
+  - **Session Approval Cache**: Maintains an in-memory `approvedSessions` concurrent set so parallel streams for the same transfer batch bypass duplicate authorization dialogs.
+  - **Socket Tuning**: Enforces `tcpNoDelay = true` and dynamic `sendBufferSize`/`receiveBufferSize` scaling from 64 KB up to 256 KB.
+
+- **`hotspot/HotspotManager.kt` (Offline Zero-Router Hotspot)**:
+  - **SoftAP Hotspot**: Initiates Android `LocalOnlyHotspot` (Android 8.0+, API 26+) when no external Wi-Fi router is available.
+  - **Dynamic Credentials**: Extracts system-assigned SoftAP SSID and WPA2/WPA3 passphrase, packaging them into the receiver's pairing QR code.
+  - **Client Auto-Connect**: Uses `WifiNetworkSpecifier` (API 29+) to automatically bind network traffic directly to the receiver's hotspot without affecting the device's internet default routing.
+
+- **`webdrop/WebDropServer.kt` (Zero-App HTTP Micro-Server)**:
+  - Embedded micro HTTP server running on port `8080` (auto-falls back across `8080`–`8095`).
+  - Serves a self-contained cosmic dark-mode single page web application for cross-platform sharing with iOS, macOS, Windows, and Linux.
+  - Chunked `multipart/form-data` uploads and streaming downloads directly into `Downloads/Astron/`.
+
+- **`lightdrop/LightDropManager.kt` (Adaptive Optical Air-Gap)**:
+  - Air-gapped visual transfer protocol transmitting sequenced QR frames through display-to-camera optical coupling.
+  - **Adaptive Densities**:
+    - `RESILIENT` (128 Bytes/frame): Maximum scanning tolerance for low light or rapid movement.
+    - `BALANCED` (256 Bytes/frame): Optimal default throughput and camera focus latency.
+    - `ULTRA` (512 Bytes/frame): High throughput for 4K / macro smartphone lenses.
+  - **Missing Frame Diagnostics**: `ReceiverSession` tracks sparse frame indices (`getMissingFrameIndices()`), allowing real-time UI reporting of dropped frames.
+
+---
 
 ### 2.3 Transfer Management Layer (`com.astron.app.transfer` & `service`)
 - **`TransferEngine.kt`**:
-  - Central orchestrator coordinating all active sessions.
-  - Manages `StateFlow<TransferSession?>` observed by UI and services.
-  - Calculates Exponential Moving Average (EMA) transfer speeds (`α = 0.25`) for jitter-free rate gauges.
-  - Dispatches transfer records to `HistoryRepository`.
+  - Central orchestrator coordinating sessions across LAN, Hotspot, Web Drop, and Light Drop.
+  - Manages `StateFlow<TransferSession?>` with pause, resume, and cancellation mechanics.
+  - Exponential Moving Average (EMA) transfer speed smoothing (`α = 0.25`).
+  - Emits sensory audio feedback via `SoundFeedbackManager` on start, alert, and verified completion.
+  - Dispatches completed records to `HistoryRepository`.
 - **`TransferForegroundService.kt`**:
-  - Runs with `FOREGROUND_SERVICE_TYPE_DATA_SYNC`.
-  - Maintains a CPU wake-lock and Wi-Fi lock during active transfers to prevent OS throttling.
-  - Renders a real-time progress notification with cancellation intent.
+  - Foreground service with `FOREGROUND_SERVICE_TYPE_DATA_SYNC`.
+  - Maintains `PARTIAL_WAKE_LOCK` and Wi-Fi lock during active transfers to prevent Android Doze mode throttling.
+  - Interactive notification with live progress bar and pause/cancel actions.
 
-### 2.4 Data Persistence Layer (`com.astron.app.data`)
-- **`PreferencesRepository.kt`**: Jetpack DataStore managing user preferences (Device Name, Transfer Priority, Auto-Accept, Haptic Feedback).
-- **`HistoryRepository.kt`**: Jetpack DataStore storing timestamped transfer history records with search and clearing capabilities.
+---
 
-### 2.5 UI Presentation Layer (`com.astron.app.ui`)
-- **`theme/`**: Theme tokens, typography (Inter/Space Grotesk style), and cosmic dark palette.
-- **`components/`**:
-  - `AstronLogoHeader`: Interactive planetary ring animation with logo.
-  - `ProximityRadarSheet`: Fullscreen or modal radar with dynamic distance rings and discovered peers.
-  - `IncomingTransferDialog`: Clear peer confirmation prompt with file count, size, and accept/reject actions.
-- **`screens/`**:
-  - `HomeScreen`: Central dashboard with large Send/Receive hero controls, Web Drop & Light Drop buttons, and recent activity.
-  - `SendScreen`: File picker, selection tray, peer discovery radar.
-  - `ReceiveScreen`: Passive receiver beacon, pairing QR code, incoming authorization dialog.
-  - `TransferScreen`: Active transfer cockpit with orbital progress meter, live speed gauge, time remaining, pause/cancel controls, and verification confirmation.
-  - `WebDropScreen`: Browser sharing portal, live connection logs, IP/port display, and QR code.
-  - `LightDropScreen`: Dual-mode screen for optical transmitter and camera receiver.
-  - `HistoryScreen`: Detailed logs of previous transfers with status chips and file sizes.
-  - `SettingsScreen`: Device name customization, priority presets, and diagnostics dialog.
+### 2.4 Presentation Layer (`com.astron.app.ui`)
+- **Cosmic Celestial Theme**: Modern OLED-optimized palette featuring Cosmic Cyan, Electric Blue, Stellar Violet, and Surface Elevation tokens.
+- **Dynamic Micro-Interactions**:
+  - `CosmicStarfield`: Procedurally rendered twinkling canvas background across all primary screens.
+  - `DiagnosticsSheet`: Bottom modal displaying live network interfaces, local IPs, active ports, and storage metrics.
+  - `TransferScreen`: Holographic speedometer gauge with live MB/s, ETA, and progress arc.
 
 ---
 
 ## 3. Memory & Threading Model
 
-- **Constant Memory Footprint**: Bounded buffer streaming (`64 KB` for TCP, `1 MB` for Web Drop). Memory usage stays under 35 MB regardless of whether a 5 MB photo or a 50 GB 4K video is transferred.
-- **Dispatchers**:
-  - `Dispatchers.IO`: File reads/writes, TCP socket connections, HTTP server handling.
-  - `Dispatchers.Default`: Cryptographic operations, frame serialization, CRC32 calculations.
-  - `Dispatchers.Main`: UI composition and state rendering.
+- **Constant Memory Footprint**: Bounded buffer streaming (`64 KB` – `256 KB` per socket chunk). Memory usage stays under 35 MB regardless of whether a 5 MB photo or a 100 GB file archive is transferred.
+- **Coroutines & Thread Safety**:
+  - `Dispatchers.IO`: File reads/writes, multi-stream TCP socket handling, HTTP server operations.
+  - `Dispatchers.Default`: AES-256-GCM encryption/decryption, SHA-256 streaming hashing, CRC32 checks, and ZXing QR generation.
+  - `Dispatchers.Main`: Jetpack Compose UI state binding and interaction dispatch.

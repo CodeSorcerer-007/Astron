@@ -182,8 +182,8 @@ class WebDropServer(
                 return
             }
 
-            // Session token verification
-            if (sessionToken.isNotBlank() && path != "/favicon.ico") {
+            // Session token verification (exempt public assets)
+            if (sessionToken.isNotBlank() && path != "/favicon.ico" && path != "/logo.png") {
                 val queryToken = if (rawPath.contains("token=")) {
                     rawPath.substringAfter("token=").substringBefore('&')
                 } else ""
@@ -198,6 +198,7 @@ class WebDropServer(
             if (method == "GET") {
                 when {
                     path == "/" -> serveWebClientHtml(outStream)
+                    path == "/logo.png" || path == "/favicon.ico" -> serveLogo(outStream)
                     path == "/api/status" -> {
                         val safeDevice = htmlEscape(deviceName)
                         val json = "{\"deviceName\":\"$safeDevice\",\"filesCount\":${sharedFiles.size}}"
@@ -289,6 +290,7 @@ class WebDropServer(
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Astron Web Drop — $safeDeviceName</title>
+            <link rel="icon" type="image/png" href="/logo.png">
             <style>
                 :root {
                     --bg-dark: #070A12;
@@ -304,7 +306,8 @@ class WebDropServer(
                 body { background: var(--bg-dark); color: var(--text); padding: 24px 16px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
                 .container { width: 100%; max-width: 680px; }
                 header { text-align: center; margin-bottom: 32px; }
-                .logo-ring { width: 64px; height: 64px; border-radius: 20px; background: linear-gradient(135deg, var(--cyan), var(--blue)); display: inline-flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 800; color: #070A12; margin-bottom: 12px; box-shadow: 0 0 30px rgba(0,229,255,0.4); }
+                .brand-logo-wrap { display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+                .brand-logo { width: 72px; height: 72px; object-fit: contain; filter: drop-shadow(0 0 25px rgba(0,229,255,0.7)); }
                 h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
                 p.sub { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
                 .badge { display: inline-block; padding: 4px 12px; border-radius: 999px; background: rgba(0,229,255,0.1); border: 1px solid var(--border); color: var(--cyan); font-size: 12px; font-weight: 600; margin-top: 8px; }
@@ -329,7 +332,9 @@ class WebDropServer(
         <body>
             <div class="container">
                 <header>
-                    <div class="logo-ring">A</div>
+                    <div class="brand-logo-wrap">
+                        <img src="/logo.png" alt="Astron Logo" class="brand-logo" />
+                    </div>
                     <h1>Astron Web Drop</h1>
                     <p class="sub">Connected to <strong>$safeDeviceName</strong></p>
                     <div class="badge">Direct P2P Encrypted Session</div>
@@ -519,5 +524,24 @@ class WebDropServer(
         out.write(header.toByteArray(Charsets.UTF_8))
         out.write(bytes)
         out.flush()
+    }
+
+    private fun serveLogo(out: OutputStream) {
+        try {
+            val inputStream = context.resources.openRawResource(com.astron.app.R.drawable.astron_logo)
+            val bytes = inputStream.readBytes()
+            inputStream.close()
+            val header = "HTTP/1.1 200 OK\r\n" +
+                    corsHeaders() +
+                    "Content-Type: image/png\r\n" +
+                    "Content-Length: ${bytes.size}\r\n" +
+                    "Cache-Control: public, max-age=86400\r\n" +
+                    "Connection: close\r\n\r\n"
+            out.write(header.toByteArray(Charsets.UTF_8))
+            out.write(bytes)
+            out.flush()
+        } catch (_: Throwable) {
+            send404(out)
+        }
     }
 }

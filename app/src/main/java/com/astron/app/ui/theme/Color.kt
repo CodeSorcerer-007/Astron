@@ -24,6 +24,7 @@ val ElectricBlue = Color(0xFF3B82F6)     // Vibrant Blue
 val StellarViolet = Color(0xFF7C3AED)    // Deep Indigo / Violet
 val EmeraldVerified = Color(0xFF059669)  // Verified Emerald Green
 val RadiantAmber = Color(0xFFD97706)     // Alert Amber
+val SolarGold = RadiantAmber        // Solar Gold / Alert Amber alias
 val CrimsonError = Color(0xFFDC2626)     // Danger Red
 
 // High-Contrast Helvetica Typography Colors

@@ -1,5 +1,6 @@
 package com.astron.app.ui.screens.settings
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,13 +51,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.astron.app.BuildConfig
+import com.astron.app.R
 import com.astron.app.core.model.TransferPriority
 import com.astron.app.core.util.NetworkUtils
+import com.astron.app.ui.components.CosmicStarfield
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
@@ -76,6 +80,7 @@ fun SettingsScreen(
     val transferPriority by viewModel.transferPriority.collectAsState()
     val autoAccept by viewModel.autoAcceptTrusted.collectAsState()
     val haptics by viewModel.hapticsEnabled.collectAsState()
+    val soundEnabled by viewModel.soundEnabled.collectAsState()
     val darkMode by viewModel.darkMode.collectAsState()
 
     var showNameDialog by remember { mutableStateOf(false) }
@@ -105,14 +110,20 @@ fun SettingsScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp)
-                .verticalScroll(rememberScrollState())
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
+            CosmicStarfield(starCount = 25)
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Spacer(modifier = Modifier.height(10.dp))
 
             // SECTION 1: DEVICE IDENTITY
             Text(
@@ -272,6 +283,34 @@ fun SettingsScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Sound feedback toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceLight)
+                    .border(1.dp, BorderLight, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Acoustic Chimes", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Synthesized audio cues on start, alert & completion", color = TextSecondary, fontSize = 12.sp)
+                }
+                Switch(
+                    checked = soundEnabled,
+                    onCheckedChange = { viewModel.setSoundEnabled(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = CosmicCyan,
+                        uncheckedTrackColor = SurfaceHover
+                    )
+                )
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             // SECTION 4: ADVANCED DIAGNOSTICS
@@ -310,11 +349,18 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Image(
+                    painter = painterResource(id = R.drawable.astron_logo),
+                    contentDescription = "Astron Logo",
+                    modifier = Modifier.size(44.dp)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
                 Text("Astron v${BuildConfig.VERSION_NAME}", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Text("Local-First • Encrypted • Zero Cloud Storage", color = TextSecondary.copy(alpha = 0.6f), fontSize = 11.sp)
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 

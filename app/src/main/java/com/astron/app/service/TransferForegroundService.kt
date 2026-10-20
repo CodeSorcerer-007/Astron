@@ -8,8 +8,11 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.BitmapFactory
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.astron.app.MainActivity
@@ -96,6 +99,8 @@ class TransferForegroundService : Service() {
     private lateinit var notificationManager: NotificationManager
     private var peerName = "Nearby Device"
     private var isForegroundActive = false
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -103,8 +108,54 @@ class TransferForegroundService : Service() {
         createNotificationChannel()
     }
 
+    private fun acquireLocks() {
+        try {
+            if (wakeLock == null) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                wakeLock = powerManager?.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "astron:transfer_wakelock"
+                )?.apply {
+                    setReferenceCounted(false)
+                    acquire(15 * 60 * 1000L) // 15 min safety timeout
+                }
+            }
+            if (wifiLock == null) {
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                @Suppress("DEPRECATION")
+                val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = wifiManager?.createWifiLock(mode, "astron:transfer_wifilock")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed acquiring transfer locks: ${t.message}")
+        }
+    }
+
+    private fun releaseLocks() {
+        try {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
+            wakeLock = null
+        } catch (_: Throwable) {}
+        try {
+            wifiLock?.let {
+                if (it.isHeld) it.release()
+            }
+            wifiLock = null
+        } catch (_: Throwable) {}
+    }
+
     private fun ensureForegroundStarted() {
         if (!isForegroundActive) {
+            acquireLocks()
             val notification = buildNotification(
                 progressPercent = 0,
                 contentTitle = "Preparing transfer with $peerName",
@@ -224,6 +275,12 @@ class TransferForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val brandLogo = try {
+            BitmapFactory.decodeResource(resources, R.drawable.astron_logo)
+        } catch (_: Throwable) {
+            null
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(contentTitle)
             .setContentText(contentText)
@@ -234,6 +291,11 @@ class TransferForegroundService : Service() {
                     android.R.drawable.ic_dialog_info
                 }
             )
+            .apply {
+                if (brandLogo != null) {
+                    setLargeIcon(brandLogo)
+                }
+            }
             .setContentIntent(pendingOpenApp)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -243,6 +305,7 @@ class TransferForegroundService : Service() {
     }
 
     private fun safeStopForeground() {
+        releaseLocks()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -252,5 +315,10 @@ class TransferForegroundService : Service() {
             }
         } catch (_: Throwable) {}
         isForegroundActive = false
+    }
+
+    override fun onDestroy() {
+        releaseLocks()
+        super.onDestroy()
     }
 }

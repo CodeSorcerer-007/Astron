@@ -67,6 +67,8 @@ data class PeerDevice(
     val model: String = "",
     val isTrusted: Boolean = false,
     val signalStrength: Int = 95,
+    val hotspotSsid: String? = null,
+    val hotspotPass: String? = null,
     val lastSeen: Long = System.currentTimeMillis()
 )
 

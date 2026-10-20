@@ -17,6 +17,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -32,6 +34,10 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicLong
+import javax.crypto.SecretKey
 
 class LanTransport(
     private val context: Context,
@@ -74,6 +80,7 @@ class LanTransport(
     private var isAdvertising = false
     private var isDiscovering = false
     private val connectionSemaphore = Semaphore(3)
+    private val approvedSessions = ConcurrentHashMap.newKeySet<String>()
 
     /**
      * Starts advertising this device on the local network via NSD (mDNS).
@@ -213,7 +220,8 @@ class LanTransport(
     }
 
     /**
-     * SENDER: Sends a batch of files to a remote peer over a high-speed TCP socket.
+     * SENDER: Sends a batch of files to a remote peer over a high-speed TCP socket,
+     * utilizing multi-stream parallel socket dispatch when MAX_SPEED is enabled.
      */
     suspend fun sendFiles(
         peer: PeerDevice,
@@ -228,15 +236,19 @@ class LanTransport(
         val chunkSize = getChunkBufferSize(priority)
         val sessionToken = CryptoManager.generateSessionToken(16)
         val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
-        var socket: Socket? = null
-        try {
-            socket = Socket()
-            socket.tcpNoDelay = true
-            socket.sendBufferSize = chunkSize
-            socket.connect(InetSocketAddress(peer.hostAddress, peer.port), 10_000)
+        val totalTransferred = AtomicLong(0L)
+        val itemQueue = ConcurrentLinkedQueue(items)
 
-            val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream(), chunkSize))
-            val inStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
+        var primarySocket: Socket? = null
+        try {
+            primarySocket = Socket().apply {
+                tcpNoDelay = true
+                sendBufferSize = chunkSize
+                connect(InetSocketAddress(peer.hostAddress, peer.port), 10_000)
+            }
+
+            val outStream = DataOutputStream(BufferedOutputStream(primarySocket.getOutputStream(), chunkSize))
+            val inStream = DataInputStream(BufferedInputStream(primarySocket.getInputStream()))
 
             // 1. Handshake with session token for wire encryption
             outStream.writeByte(OP_HANDSHAKE_REQ.toInt())
@@ -259,73 +271,176 @@ class LanTransport(
             outStream.write(manifestBytes)
             outStream.flush()
 
-            var totalTransferred = 0L
-            val buffer = ByteArray(chunkSize)
+            val maxStreams = if (priority == TransferPriority.MAX_SPEED && items.size > 1) 3.coerceAtMost(items.size) else 1
 
-            // 3. Send Each File with bounded streaming & offset resume
-            for (item in items) {
-                if (isCancelled()) {
-                    outStream.writeByte(OP_CANCEL.toInt())
-                    outStream.flush()
-                    return@withContext false
-                }
+            if (maxStreams <= 1) {
+                // Single-stream sequential transmission
+                return@withContext sendStreamItems(
+                    outStream = outStream,
+                    itemQueue = itemQueue,
+                    sessionKey = sessionKey,
+                    chunkSize = chunkSize,
+                    manifest = manifest,
+                    priority = priority,
+                    totalTransferred = totalTransferred,
+                    onProgress = onProgress,
+                    onFileVerified = onFileVerified,
+                    isCancelled = isCancelled,
+                    awaitUnpause = awaitUnpause
+                )
+            } else {
+                // Multi-Stream Parallel Socket Acceleration
+                coroutineScope {
+                    val deferreds = (0 until maxStreams).map { streamIndex ->
+                        async(Dispatchers.IO) {
+                            if (streamIndex == 0) {
+                                sendStreamItems(
+                                    outStream = outStream,
+                                    itemQueue = itemQueue,
+                                    sessionKey = sessionKey,
+                                    chunkSize = chunkSize,
+                                    manifest = manifest,
+                                    priority = priority,
+                                    totalTransferred = totalTransferred,
+                                    onProgress = onProgress,
+                                    onFileVerified = onFileVerified,
+                                    isCancelled = isCancelled,
+                                    awaitUnpause = awaitUnpause
+                                )
+                            } else {
+                                var workerSocket: Socket? = null
+                                try {
+                                    workerSocket = Socket().apply {
+                                        tcpNoDelay = true
+                                        sendBufferSize = chunkSize
+                                        connect(InetSocketAddress(peer.hostAddress, peer.port), 10_000)
+                                    }
+                                    val workerOut = DataOutputStream(BufferedOutputStream(workerSocket.getOutputStream(), chunkSize))
+                                    val workerIn = DataInputStream(BufferedInputStream(workerSocket.getInputStream()))
 
-                val uri = android.net.Uri.parse(item.uriString)
-                val inputStream = storageManager.openInputStreamAtOffset(uri, 0L)
+                                    // Handshake worker
+                                    workerOut.writeByte(OP_HANDSHAKE_REQ.toInt())
+                                    workerOut.writeUTF(manifest.sessionId)
+                                    workerOut.writeUTF(manifest.senderDeviceName)
+                                    workerOut.writeUTF(sessionToken)
+                                    workerOut.flush()
 
-                outStream.writeByte(OP_FILE_START.toInt())
-                outStream.writeUTF(item.id)
-                outStream.writeUTF(item.name)
-                outStream.writeLong(item.size)
-                outStream.flush()
+                                    val wResp = workerIn.readByte()
+                                    if (wResp == OP_HANDSHAKE_RESP) {
+                                        workerOut.writeByte(OP_MANIFEST.toInt())
+                                        workerOut.writeInt(manifestBytes.size)
+                                        workerOut.write(manifestBytes)
+                                        workerOut.flush()
 
-                // Stream chunks
-                var bytesRead: Int
-                var fileTransferred = 0L
-
-                inputStream.use { stream ->
-                    while (stream.read(buffer).also { bytesRead = it } != -1) {
-                        if (isCancelled()) {
-                            outStream.writeByte(OP_CANCEL.toInt())
-                            outStream.flush()
-                            return@withContext false
-                        }
-                        awaitUnpause()
-
-                        val plainChunk = if (bytesRead == buffer.size) buffer else buffer.copyOf(bytesRead)
-                        val encryptedChunk = CryptoManager.encryptAesGcm(plainChunk, sessionKey)
-
-                        outStream.writeByte(OP_CHUNK.toInt())
-                        outStream.writeInt(encryptedChunk.size)
-                        outStream.write(encryptedChunk)
-                        // Per-chunk flush() removed to allow socket buffering and 2x throughput!
-
-                        fileTransferred += bytesRead
-                        totalTransferred += bytesRead
-                        onProgress(totalTransferred, manifest.totalBytes, item.name)
-
-                        if (priority == TransferPriority.BATTERY_SAVER) {
-                            yield()
+                                        sendStreamItems(
+                                            outStream = workerOut,
+                                            itemQueue = itemQueue,
+                                            sessionKey = sessionKey,
+                                            chunkSize = chunkSize,
+                                            manifest = manifest,
+                                            priority = priority,
+                                            totalTransferred = totalTransferred,
+                                            onProgress = onProgress,
+                                            onFileVerified = onFileVerified,
+                                            isCancelled = isCancelled,
+                                            awaitUnpause = awaitUnpause
+                                        )
+                                    } else {
+                                        false
+                                    }
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Worker stream $streamIndex failed, falling back to primary", e)
+                                    false
+                                } finally {
+                                    try { workerSocket?.close() } catch (_: Exception) {}
+                                }
+                            }
                         }
                     }
+                    deferreds.awaitAll().any { it }
                 }
-
-                outStream.writeByte(OP_FILE_END.toInt())
-                outStream.writeUTF(item.id)
-                outStream.flush()
-
-                onFileVerified(item.id)
             }
-
-            outStream.writeByte(OP_TRANSFER_COMPLETE.toInt())
-            outStream.flush()
-            return@withContext true
         } catch (e: Exception) {
             Log.e(TAG, "LAN sendFiles failed", e)
             return@withContext false
         } finally {
-            try { socket?.close() } catch (_: Exception) {}
+            try { primarySocket?.close() } catch (_: Exception) {}
         }
+    }
+
+    private suspend fun sendStreamItems(
+        outStream: DataOutputStream,
+        itemQueue: ConcurrentLinkedQueue<TransferItem>,
+        sessionKey: SecretKey,
+        chunkSize: Int,
+        manifest: TransferManifest,
+        priority: TransferPriority,
+        totalTransferred: AtomicLong,
+        onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
+        onFileVerified: (fileId: String) -> Unit,
+        isCancelled: () -> Boolean,
+        awaitUnpause: suspend () -> Unit
+    ): Boolean {
+        val buffer = ByteArray(chunkSize)
+
+        while (true) {
+            val item = itemQueue.poll() ?: break
+
+            if (isCancelled()) {
+                outStream.writeByte(OP_CANCEL.toInt())
+                outStream.flush()
+                return false
+            }
+
+            val uri = android.net.Uri.parse(item.uriString)
+            val inputStream = storageManager.openInputStreamAtOffset(uri, 0L)
+
+            outStream.writeByte(OP_FILE_START.toInt())
+            outStream.writeUTF(item.id)
+            outStream.writeUTF(item.name)
+            outStream.writeLong(item.size)
+            outStream.flush()
+
+            // Stream chunks
+            var bytesRead: Int
+            var fileTransferred = 0L
+
+            inputStream.use { stream ->
+                while (stream.read(buffer).also { bytesRead = it } != -1) {
+                    if (isCancelled()) {
+                        outStream.writeByte(OP_CANCEL.toInt())
+                        outStream.flush()
+                        return false
+                    }
+                    awaitUnpause()
+
+                    val plainChunk = if (bytesRead == buffer.size) buffer else buffer.copyOf(bytesRead)
+                    val encryptedChunk = CryptoManager.encryptAesGcm(plainChunk, sessionKey)
+
+                    outStream.writeByte(OP_CHUNK.toInt())
+                    outStream.writeInt(encryptedChunk.size)
+                    outStream.write(encryptedChunk)
+
+                    fileTransferred += bytesRead
+                    val total = totalTransferred.addAndGet(bytesRead.toLong())
+                    onProgress(total, manifest.totalBytes, item.name)
+
+                    if (priority == TransferPriority.BATTERY_SAVER) {
+                        yield()
+                    }
+                }
+            }
+
+            outStream.writeByte(OP_FILE_END.toInt())
+            outStream.writeUTF(item.id)
+            outStream.flush()
+
+            onFileVerified(item.id)
+        }
+
+        outStream.writeByte(OP_TRANSFER_COMPLETE.toInt())
+        outStream.flush()
+        return true
     }
 
     /**
@@ -432,8 +547,18 @@ class LanTransport(
 
             val manifest = json.decodeFromString<TransferManifest>(String(manifestBytes, Charsets.UTF_8))
 
-            // Ask user for approval
-            val approved = onIncomingRequest(manifest)
+            // Ask user for approval if not already approved for this session
+            val isAlreadyApproved = approvedSessions.contains(manifest.sessionId)
+            val approved = if (isAlreadyApproved) {
+                true
+            } else {
+                val userApproved = onIncomingRequest(manifest)
+                if (userApproved) {
+                    approvedSessions.add(manifest.sessionId)
+                }
+                userApproved
+            }
+
             if (!approved) {
                 outStream.writeByte(OP_CANCEL.toInt())
                 outStream.flush()
@@ -531,5 +656,6 @@ class LanTransport(
             serverSocket?.close()
         } catch (_: Exception) {}
         serverSocket = null
+        approvedSessions.clear()
     }
 }
