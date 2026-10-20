@@ -155,3 +155,81 @@ Astron utilizes hardware-synthesized audio cues via `SoundFeedbackManager` to pr
 - **Transfer Start**: 80 ms resonant beep (`TONE_PROP_BEEP`) confirming link establishment.
 - **Incoming Approval Alert**: Dual 100 ms alert chimes (`TONE_PROP_PROMPT`) notifying receiver of inbound file authorization.
 - **Transfer Complete**: Two-stage harmonious confirmation chime (`TONE_PROP_ACK` -> 140 ms delay -> `TONE_PROP_PROMPT`) signalling SHA-256 verification success.
+
+---
+
+## 6. Low-Power BLE Background Beaconing Protocol
+
+Astron utilizes Bluetooth Low Energy (BLE) background advertising to allow device presence detection even when one peer's screen is locked or Wi-Fi is sleeping:
+- **Service UUID**: `0000a570-0000-1000-8000-00805f9b34fb` (`ASTRON_SERVICE_UUID`)
+- **Astron Manufacturer ID**: `0x0570`
+- **Advertisement Mode**: `ADVERTISE_MODE_LOW_POWER` / `TX_POWER_MEDIUM`
+- **Scan Mode**: `SCAN_MODE_LOW_LATENCY` (foreground) / `SCAN_MODE_BALANCED` (background)
+
+### 6.1 Beacon Packet Wire Layout (16-Byte Compact Frame)
+```
+┌───────────────┬──────────────┬──────────────────┬─────────────────────────────┐
+│ Version (1B)  │ Flags (1B)   │ Port (2B Big-End)│ Device Name (up to 12B UTF) │
+└───────────────┴──────────────┴──────────────────┴─────────────────────────────┘
+```
+- **Flags Bitmask**:
+  - `0x01` (`FLAG_LAN_READY`): Peer is listening on Wi-Fi LAN socket
+  - `0x02` (`FLAG_HOTSPOT_ACTIVE`): SoftAP hotspot is broadcasting
+  - `0x04` (`FLAG_RELAY_ACTIVE`): Connected to global WebSocket relay
+- **RSSI Proximity Mapping**:
+  - `RSSI >= -50 dBm`: Immediate proximity (< 1m, 98% signal)
+  - `RSSI >= -65 dBm`: Near proximity (1–3m, 85% signal)
+  - `RSSI >= -80 dBm`: Medium range (3–6m, 65% signal)
+  - `RSSI < -80 dBm`: Far / perimeter (> 6m, 40% signal)
+
+---
+
+## 7. UPnP / NAT-PMP IGD Automatic WAN Port Forwarding
+
+For direct Internet peer-to-peer transfers across residential routers without intermediary relay servers:
+1. **SSDP Multicast Discovery**: Device broadcasts an M-SEARCH query to `239.255.255.250:1900` seeking `urn:schemas-upnp-org:device:InternetGatewayDevice:1`.
+2. **IGD Location Parsing**: Discovers router XML device descriptor URL (e.g., `http://192.168.1.1:1900/rootDesc.xml`).
+3. **WANIPConnection Discovery**: Locates `urn:schemas-upnp-org:service:WANIPConnection:1` or `WANPPPConnection:1` control endpoint.
+4. **SOAP RPC Execution**:
+   - `GetExternalIPAddress`: Fetches public residential WAN IP.
+   - `AddPortMapping`: Injects a temporary lease mapping router port `52737` to device internal IP `192.168.1.X:52737`.
+5. **Direct Connect**: Remote peer connects directly over public WAN IP at native Gigabit line speeds.
+6. **Automatic Cleanup**: Mapping is leased for 3600s and explicitly cleared on session teardown via `DeletePortMapping`.
+
+---
+
+## 8. Wi-Fi Multicast Batch Group Protocol with Forward Error Correction (FEC)
+
+For broadcasting the exact same batch of files to 5–50 devices simultaneously (classrooms, field teams, event audiences):
+- **Multicast Group IP**: `239.255.42.99`
+- **Multicast Port**: `52738`
+- **Protocol Magic**: `0x4153544D` ("ASTM")
+- **Chunk MTU Size**: 1,400 bytes (safely fits within standard 1,500-byte 802.11 MTU without IP packet fragmentation)
+- **Lock Management**: Holds Android `WifiManager.MulticastLock` with power optimization.
+
+### 8.1 Wire Opcodes
+- `0x01` (`OP_ANNOUNCE`): Manifest announcement with JSON payload and SHA-256 digests.
+- `0x02` (`OP_CHUNK`): Binary file payload slice with item ID, sequence index, and CRC32.
+- `0x03` (`OP_PARITY`): Forward Error Correction XOR parity packet covering the preceding 4 chunks.
+- `0x04` (`OP_ACK_REQ`): Sender synchronization barrier.
+- `0x05` (`OP_NACK`): Receiver selective repeat request for unrecoverable packets.
+- `0x06` (`OP_COMPLETE`): Stream termination and final SHA-256 seal.
+
+### 8.2 XOR Parity Reconstruction Mechanism
+Astron bundles every 4 data chunks (`C0`, `C1`, `C2`, `C3`) with 1 parity chunk (`P = C0 ^ C1 ^ C2 ^ C3`).
+If any single chunk (e.g., `C2`) is dropped by Wi-Fi interference:
+$$\text{Recovered } C2 = C0 \oplus C1 \oplus C3 \oplus P$$
+The missing packet is mathematically reconstructed in memory with **0 ms latency and zero re-transmission overhead**.
+
+---
+
+## 9. Byte-Level Resume & Crash-Recovery Protocol
+
+To guarantee resilience against network drops, battery exhaustion, or process termination during multi-gigabyte transfers:
+1. **Periodic Checkpoint Persistence**: During streaming, `TransferEngine` records transferred byte progress to the encrypted Room SQLite WAL database every 10 MB or 1 second.
+2. **Wire Negotiation (`OP_FILE_RESUME = 0x09`)**:
+   - When a broken session restarts, the sender queries the receiver with `OP_FILE_RESUME` providing `itemId` and the recorded `startOffset`.
+   - The sender seeks the file pointer using `RandomAccessFile.seek(startOffset)` or skip-stream.
+   - The receiver re-opens the target `.astron_tmp` file with `StorageManager.FileWriteSession.seekTo(startOffset)` to resume writing seamlessly at the exact broken byte.
+3. **Atomic Finalization**: Only when all file bytes are received and verified with SHA-256 is the temporary file atomically renamed to its permanent filename.
+

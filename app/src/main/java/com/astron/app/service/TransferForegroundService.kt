@@ -284,6 +284,7 @@ class TransferForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(contentTitle)
             .setContentText(contentText)
+            .setSubText(getString(R.string.notification_background_notice))
             .setSmallIcon(
                 try {
                     R.drawable.ic_notification

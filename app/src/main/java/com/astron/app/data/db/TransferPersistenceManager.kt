@@ -57,6 +57,17 @@ class TransferPersistenceManager @Inject constructor(
         }
     }
 
+    suspend fun getSessionWithFiles(sessionId: String): InterruptedSession? = withContext(Dispatchers.IO) {
+        try {
+            val session = transferDao.getSessionById(sessionId) ?: return@withContext null
+            val files = transferDao.getFilesForSession(sessionId)
+            InterruptedSession(session = session, files = files)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching session $sessionId", e)
+            null
+        }
+    }
+
     suspend fun saveSessionStart(
         sessionId: String,
         direction: TransferDirection,

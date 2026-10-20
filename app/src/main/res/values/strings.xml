@@ -1,3 +1,139 @@
 <resources>
+    <!-- App Identity -->
     <string name="app_name">Astron</string>
+    <string name="app_tagline">God-Tier Android Local &amp; Remote File Transfer</string>
+    <string name="app_description">Whatever the file. Whatever the network. Whatever the distance. Just send it.</string>
+
+    <!-- Navigation & Core Screens -->
+    <string name="nav_home">Home</string>
+    <string name="nav_send">Send Files</string>
+    <string name="nav_receive">Receive Files</string>
+    <string name="nav_webdrop">Web Drop</string>
+    <string name="nav_lightdrop">Light Drop</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_file_browser">File Explorer</string>
+
+    <!-- Home Quick Actions -->
+    <string name="action_send_title">Send Files</string>
+    <string name="action_send_subtitle">Send to nearby or remote devices</string>
+    <string name="action_receive_title">Receive Files</string>
+    <string name="action_receive_subtitle">Discoverable on Wi-Fi, Hotspot, BLE</string>
+    <string name="action_webdrop_title">Web Drop</string>
+    <string name="action_webdrop_subtitle">Share with iPhone, Mac, PC via browser</string>
+    <string name="action_lightdrop_title">Light Drop</string>
+    <string name="action_lightdrop_subtitle">Zero-radio optical air-gapped QR streaming</string>
+
+    <!-- Common Actions & Buttons -->
+    <string name="btn_send">Send</string>
+    <string name="btn_receive">Receive</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_pause">Pause</string>
+    <string name="btn_resume">Resume</string>
+    <string name="btn_dismiss">Dismiss</string>
+    <string name="btn_retry">Retry</string>
+    <string name="btn_done">Done</string>
+    <string name="btn_close">Close</string>
+    <string name="btn_back">Back</string>
+    <string name="btn_select_all">Select All</string>
+    <string name="btn_clear_all">Clear All</string>
+    <string name="btn_confirm">Confirm</string>
+    <string name="btn_approve">Approve</string>
+    <string name="btn_decline">Decline</string>
+    <string name="btn_open">Open File</string>
+    <string name="btn_open_folder">Open Folder</string>
+    <string name="btn_diagnostics">Diagnostics</string>
+    <string name="btn_permissions">Grant Permissions</string>
+
+    <!-- Transport Types & Badges -->
+    <string name="transport_local_wifi">Local Wi-Fi</string>
+    <string name="transport_local_wifi_badge">⚡ High-Speed LAN</string>
+    <string name="transport_wifi_direct">Wi-Fi Direct</string>
+    <string name="transport_wifi_direct_badge">📶 Direct P2P</string>
+    <string name="transport_hotspot">Hotspot Mode</string>
+    <string name="transport_hotspot_badge">📡 Local Hotspot</string>
+    <string name="transport_bluetooth">Bluetooth</string>
+    <string name="transport_bluetooth_badge">🔵 Bluetooth Classic</string>
+    <string name="transport_ble_beacon">BLE Beacon</string>
+    <string name="transport_ble_beacon_badge">⚡ BLE Low-Power</string>
+    <string name="transport_internet_relay">Internet Relay</string>
+    <string name="transport_internet_relay_badge">🌍 Remote Transfer</string>
+    <string name="transport_webdrop">Web Drop</string>
+    <string name="transport_webdrop_badge">🌐 Browser Mode</string>
+    <string name="transport_lightdrop">Light Drop</string>
+    <string name="transport_lightdrop_badge">✨ Zero-Radio Optical</string>
+    <string name="transport_multicast">Multicast Group</string>
+    <string name="transport_multicast_badge">📢 1-to-Many Group</string>
+    <string name="transport_upnp">Direct WAN (UPnP)</string>
+    <string name="transport_upnp_badge">🌐 Direct Router P2P</string>
+
+    <!-- File Browser Categories -->
+    <string name="category_recent">Recent</string>
+    <string name="category_photos">Photos</string>
+    <string name="category_videos">Videos</string>
+    <string name="category_audio">Audio</string>
+    <string name="category_docs">Documents</string>
+    <string name="category_apps">Installed Apps</string>
+    <string name="category_downloads">Downloads</string>
+    <string name="category_large">Large Files (&gt;100MB)</string>
+
+    <!-- Sort Orders -->
+    <string name="sort_date_desc">Newest First</string>
+    <string name="sort_date_asc">Oldest First</string>
+    <string name="sort_size_desc">Largest First</string>
+    <string name="sort_size_asc">Smallest First</string>
+    <string name="sort_name_asc">Name (A–Z)</string>
+
+    <!-- Transfer States & Telemetry -->
+    <string name="state_idle">Idle</string>
+    <string name="state_preparing">Preparing transfer…</string>
+    <string name="state_advertising">Advertising device…</string>
+    <string name="state_discovering">Discovering nearby peers…</string>
+    <string name="state_connecting">Connecting to peer…</string>
+    <string name="state_waiting_approval">Waiting for peer approval…</string>
+    <string name="state_transferring">Transferring files…</string>
+    <string name="state_paused">Transfer paused</string>
+    <string name="state_verifying">Verifying SHA-256 integrity…</string>
+    <string name="state_completed">Transfer completed successfully!</string>
+    <string name="state_cancelled">Transfer cancelled</string>
+    <string name="state_failed">Transfer failed</string>
+
+    <!-- Telemetry Headers -->
+    <string name="telemetry_live_speed">LIVE SPEED</string>
+    <string name="telemetry_peak">PEAK</string>
+    <string name="telemetry_avg">AVG</string>
+    <string name="telemetry_eta">ETA</string>
+    <string name="telemetry_transferred">Transferred</string>
+    <string name="telemetry_total">Total</string>
+    <string name="telemetry_files">Files</string>
+
+    <!-- Notifications & Foreground Service -->
+    <string name="notification_channel_name">File Transfers</string>
+    <string name="notification_channel_desc">Active high-speed file transfers with nearby and remote peers</string>
+    <string name="notification_transferring_title">Transferring with %1$s</string>
+    <string name="notification_background_notice">Astron is keeping your high-speed transfer active in the background</string>
+    <string name="notification_completed_title">Transfer Complete</string>
+    <string name="notification_completed_desc">All files transferred and verified by SHA-256 checksums</string>
+
+    <!-- Crash-Safe Resumability & Interrupted Sessions -->
+    <string name="resume_banner_title">Interrupted Transfer Detected</string>
+    <string name="resume_banner_desc">An active session was paused when the app was closed. Tap to resume from the exact byte offset.</string>
+    <string name="resume_banner_action">Resume Transfer</string>
+
+    <!-- Diagnostics Sheet -->
+    <string name="diag_title">Network &amp; Device Diagnostics</string>
+    <string name="diag_local_ip">Local IP</string>
+    <string name="diag_listening_port">Listening Port</string>
+    <string name="diag_active_interfaces">Active Interfaces</string>
+    <string name="diag_storage_free">Available Storage</string>
+    <string name="diag_storage_total">Total Storage</string>
+    <string name="diag_upnp_status">UPnP Router Port Mapping</string>
+    <string name="diag_ble_status">BLE Proximity Beacon</string>
+
+    <!-- Security & Policy Notices -->
+    <string name="security_e2e_badge">🔒 AES-256-GCM End-to-End Encrypted</string>
+    <string name="security_checksum_badge">🛡️ SHA-256 Integrity Verified</string>
+    <string name="security_zero_ads">No Ads • No Analytics • 100% Private</string>
+    <string name="foreground_policy_dialog_title">Background Transfer Execution</string>
+    <string name="foreground_policy_dialog_message">Astron uses an Android Foreground Service to maintain active socket connections and prevent the operating system from terminating large multi-gigabyte file transfers when your screen turns off.</string>
 </resources>

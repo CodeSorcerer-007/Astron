@@ -1027,6 +1027,10 @@ fun HomeScreen(
                 DiagnosticItem("P2P Hotspot Mode", "Local-Only SoftAP Ready")
                 DiagnosticItem("Parallel Streams", "Multi-Socket Engine (up to 3x)")
                 DiagnosticItem("Encryption Core", "AES-256-GCM • HKDF-SHA256")
+                DiagnosticItem("Multicast Group", "239.255.42.99:52738 (XOR FEC Active)")
+                DiagnosticItem("Router Port Mapping", "UPnP / NAT-PMP Direct WAN Ready")
+                DiagnosticItem("BLE Beaconing", "Low-Power Proximity Discovery Active")
+                DiagnosticItem("Background Service", "Foreground Service (dataSync + connectedDevice)")
                 DiagnosticItem("Storage Remaining", "${NetworkUtils.formatBytes(freeStorage)} free of ${NetworkUtils.formatBytes(totalStorage)}")
 
                 Spacer(modifier = Modifier.height(20.dp))

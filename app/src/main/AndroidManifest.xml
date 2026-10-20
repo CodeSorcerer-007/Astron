@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     
     <!-- Nearby Wi-Fi Devices for Android 13+ (P2P Wi-Fi Direct without coarse location) -->
     <uses-permission 
@@ -29,6 +30,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" tools:targetApi="s" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <!-- Camera for QR Pairing & Optical Light Drop -->
     <uses-permission android:name="android.permission.CAMERA" />

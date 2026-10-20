@@ -27,6 +27,9 @@ import com.astron.app.transport.internet.InternetRelayTransport
 import com.astron.app.transport.lan.LanTransport
 import com.astron.app.transport.lightdrop.LightDropManager
 import com.astron.app.transport.webdrop.WebDropServer
+import com.astron.app.transport.ble.BleBeaconManager
+import com.astron.app.transport.upnp.UpnpPortMapper
+import com.astron.app.transport.multicast.MulticastGroupManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,7 +60,10 @@ class TransferEngine(
     val transportOrchestrator: TransportOrchestrator = TransportOrchestrator(context),
     val persistenceManager: TransferPersistenceManager? = null,
     val duplicateDetector: DuplicateDetector = DuplicateDetector(storageManager),
-    val transferQueue: TransferQueue = TransferQueue()
+    val transferQueue: TransferQueue = TransferQueue(),
+    val bleBeaconManager: BleBeaconManager = BleBeaconManager(context),
+    val upnpPortMapper: UpnpPortMapper = UpnpPortMapper(context),
+    val multicastGroupManager: MulticastGroupManager = MulticastGroupManager(context, storageManager)
 ) : Closeable {
     companion object {
         const val TAG = "TransferEngine"
@@ -74,6 +80,12 @@ class TransferEngine(
         hotspotManager.close()
         bluetoothTransport.disconnect()
         internetRelayTransport.close()
+        bleBeaconManager.stopBeacon()
+        bleBeaconManager.stopScanning()
+        multicastGroupManager.stopGroupTransfer()
+        try {
+            CoroutineScope(Dispatchers.IO).launch { upnpPortMapper.closePortMapping() }
+        } catch (_: Throwable) {}
         scope.cancel()
     }
 
@@ -167,11 +179,22 @@ class TransferEngine(
                 }
             }
         }
+
+        // 3. Low-Energy BLE Beacon Scanning for Instant Background Discovery
+        if (bleBeaconManager.isBleSupported()) {
+            bleBeaconManager.startScanning { peer ->
+                _discoveredPeers.update { current ->
+                    val filtered = current.filter { it.hostAddress != peer.hostAddress && it.id != peer.id }
+                    listOf(peer) + filtered
+                }
+            }
+        }
     }
 
     fun stopPeerDiscovery() {
         lanTransport.stopDiscovery()
         bluetoothTransport.stopDiscovery()
+        bleBeaconManager.stopScanning()
     }
 
     /**
@@ -308,6 +331,21 @@ class TransferEngine(
                     } else false
                 }
 
+                TransportType.MULTICAST_GROUP -> {
+                    var groupOk = false
+                    multicastGroupManager.startGroupBroadcast(
+                        manifest = manifest,
+                        items = items,
+                        onProgress = { transferred, total, activeFileName ->
+                            updateThroughputAndProgress(transferred, total, activeFileName, "Multicast Group")
+                        },
+                        onComplete = { ok ->
+                            groupOk = ok
+                        }
+                    )
+                    groupOk
+                }
+
                 else -> {
                     // LOCAL_WIFI, WIFI_DIRECT, HOTSPOT
                     lanTransport.sendFiles(
@@ -406,6 +444,18 @@ class TransferEngine(
         activeJob = scope.launch(Dispatchers.IO) {
             val deviceName = preferencesRepository.deviceNameFlow.first()
             lanTransport.startAdvertising(deviceName)
+
+            // Broadcast BLE Beacon so nearby senders discover us even with screen off
+            if (bleBeaconManager.isAdvertisingSupported()) {
+                bleBeaconManager.startBeacon(deviceName)
+            }
+
+            // Attempt direct WAN port mapping via UPnP
+            try {
+                CoroutineScope(Dispatchers.IO).launch {
+                    upnpPortMapper.openPortMapping()
+                }
+            } catch (_: Throwable) {}
 
             _currentSession.value = com.astron.app.core.model.TransferSession(
                 sessionId = UUID.randomUUID().toString(),
@@ -577,6 +627,12 @@ class TransferEngine(
         webDropServer.stopServer()
         bluetoothTransport.disconnect()
         internetRelayTransport.close()
+        bleBeaconManager.stopBeacon()
+        bleBeaconManager.stopScanning()
+        multicastGroupManager.stopGroupTransfer()
+        try {
+            CoroutineScope(Dispatchers.IO).launch { upnpPortMapper.closePortMapping() }
+        } catch (_: Throwable) {}
         TransferForegroundService.stop(context)
         _currentSession.update { it?.copy(state = SessionState.CANCELLED) }
     }
@@ -584,5 +640,46 @@ class TransferEngine(
     fun dismissSession() {
         cancelTransfer()
         _currentSession.value = null
+    }
+
+    /**
+     * Resumes an interrupted transfer session using Room byte-level checkpoints.
+     * Skips fully completed files and seeks directly to the last checkpoint offset.
+     */
+    suspend fun resumeInterruptedSession(sessionId: String): Boolean {
+        val persistence = persistenceManager ?: return false
+        val interrupted = persistence.getSessionWithFiles(sessionId) ?: return false
+        val sessionEntity = interrupted.session
+        val fileEntities = interrupted.files
+
+        val remainingFiles = fileEntities.filter { it.status != ItemStatus.COMPLETED }
+        if (remainingFiles.isEmpty()) {
+            persistence.markSessionComplete(sessionId)
+            return true
+        }
+
+        val peer = PeerDevice(
+            id = sessionEntity.peerId,
+            name = sessionEntity.peerName,
+            hostAddress = sessionEntity.peerAddress,
+            port = 52737,
+            transportType = sessionEntity.transportType
+        )
+
+        val itemsToResume = remainingFiles.map { f ->
+            TransferItem(
+                id = f.fileId,
+                name = f.name,
+                size = f.size,
+                mimeType = f.mimeType,
+                uriString = f.localUri ?: "",
+                relativePath = f.relativePath,
+                checksumSha256 = f.checksumSha256,
+                transferredBytes = f.lastCheckpointOffset
+            )
+        }
+
+        startSendTransfer(peer, itemsToResume)
+        return true
     }
 }

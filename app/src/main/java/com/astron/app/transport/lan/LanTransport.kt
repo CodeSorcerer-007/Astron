@@ -65,6 +65,7 @@ class LanTransport(
         const val OP_FILE_END: Byte = 0x06
         const val OP_TRANSFER_COMPLETE: Byte = 0x07
         const val OP_CANCEL: Byte = 0x08
+        const val OP_FILE_RESUME: Byte = 0x09
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -393,12 +394,21 @@ class LanTransport(
             }
 
             val uri = android.net.Uri.parse(item.uriString)
-            val inputStream = storageManager.openInputStreamAtOffset(uri, 0L)
+            val startOffset = item.transferredBytes
+            val inputStream = storageManager.openInputStreamAtOffset(uri, startOffset)
 
-            outStream.writeByte(OP_FILE_START.toInt())
-            outStream.writeUTF(item.id)
-            outStream.writeUTF(item.name)
-            outStream.writeLong(item.size)
+            if (startOffset > 0L) {
+                outStream.writeByte(OP_FILE_RESUME.toInt())
+                outStream.writeUTF(item.id)
+                outStream.writeUTF(item.name)
+                outStream.writeLong(item.size)
+                outStream.writeLong(startOffset)
+            } else {
+                outStream.writeByte(OP_FILE_START.toInt())
+                outStream.writeUTF(item.id)
+                outStream.writeUTF(item.name)
+                outStream.writeLong(item.size)
+            }
             outStream.flush()
 
             // Stream chunks
@@ -595,6 +605,25 @@ class LanTransport(
                         currentWriteSession?.close()
                         currentFile?.let { target ->
                             currentWriteSession = storageManager.openWriteSession(target, 0L)
+                        }
+                    }
+                    OP_FILE_RESUME -> {
+                        val fileId = inStream.readUTF()
+                        val fileName = inStream.readUTF()
+                        val fileSize = inStream.readLong()
+                        val resumeOffset = inStream.readLong()
+
+                        currentItem = manifestMap[fileId]
+                        val relPath = currentItem?.relativePath ?: ""
+                        currentFile = storageManager.prepareDestinationFile(
+                            fileName,
+                            relPath,
+                            com.astron.app.core.model.DuplicateAction.KEEP_BOTH
+                        )
+                        currentFileBytes = resumeOffset
+                        currentWriteSession?.close()
+                        currentFile?.let { target ->
+                            currentWriteSession = storageManager.openWriteSession(target, resumeOffset)
                         }
                     }
                     OP_CHUNK -> {

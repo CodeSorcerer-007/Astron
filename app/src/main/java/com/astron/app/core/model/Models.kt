@@ -107,9 +107,12 @@ enum class TransportType(val displayName: String, val badge: String) {
     WIFI_DIRECT("Wi-Fi Direct", "📶 Direct P2P"),
     HOTSPOT("Hotspot", "📡 Local Hotspot"),
     BLUETOOTH("Bluetooth", "🔵 Bluetooth Classic"),
+    BLE_BEACON("BLE Beacon", "⚡ BLE Low-Power"),
     INTERNET_RELAY("Internet Relay", "🌍 Remote Transfer"),
     WEB_DROP("Web Drop", "🌐 Browser Mode"),
     OPTICAL_LIGHT("Light Drop", "✨ Zero-Radio Optical"),
+    MULTICAST_GROUP("Multicast Group", "📢 1-to-Many Group"),
+    UPNP_DIRECT("Direct WAN (UPnP)", "🌐 Direct Router P2P"),
     WIFI_AWARE("Wi-Fi Aware", "📡 NAN Direct"),
     USB_OTG("USB OTG", "🔌 USB Transfer")
 }

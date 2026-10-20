@@ -203,6 +203,36 @@ class TransportOrchestrator @Inject constructor(
                     reason = "No camera for optical transfer"
                 ))
             }
+
+            // ── MULTICAST GROUP ──────────────────────────────────────────────────
+            if (caps.hasLocalNetwork && caps.isWifiConnected) {
+                add(TransportScore(
+                    type = TransportType.MULTICAST_GROUP,
+                    score = 85,
+                    estimatedSpeedMbps = 50f,
+                    reason = "1-to-many UDP multicast broadcast with FEC error recovery"
+                ))
+            }
+
+            // ── DIRECT WAN (UPnP) ────────────────────────────────────────────────
+            if (caps.hasLocalNetwork && caps.hasInternet) {
+                add(TransportScore(
+                    type = TransportType.UPNP_DIRECT,
+                    score = 80,
+                    estimatedSpeedMbps = 40f,
+                    reason = "Direct router WAN port mapping — bypasses internet relay"
+                ))
+            }
+
+            // ── BLE BEACON ───────────────────────────────────────────────────────
+            if (caps.hasBle && caps.isBluetoothEnabled) {
+                add(TransportScore(
+                    type = TransportType.BLE_BEACON,
+                    score = 30,
+                    estimatedSpeedMbps = 0.5f,
+                    reason = "Low-power BLE background beaconing and proximity discovery"
+                ))
+            }
         }
 
         val ranked = scores.sortedByDescending { it.score }

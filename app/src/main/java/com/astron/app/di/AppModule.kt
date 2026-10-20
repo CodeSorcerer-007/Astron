@@ -153,6 +153,28 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideBleBeaconManager(
+        @ApplicationContext context: Context
+    ): com.astron.app.transport.ble.BleBeaconManager =
+        com.astron.app.transport.ble.BleBeaconManager(context)
+
+    @Provides
+    @Singleton
+    fun provideUpnpPortMapper(
+        @ApplicationContext context: Context
+    ): com.astron.app.transport.upnp.UpnpPortMapper =
+        com.astron.app.transport.upnp.UpnpPortMapper(context)
+
+    @Provides
+    @Singleton
+    fun provideMulticastGroupManager(
+        @ApplicationContext context: Context,
+        storageManager: StorageManager
+    ): com.astron.app.transport.multicast.MulticastGroupManager =
+        com.astron.app.transport.multicast.MulticastGroupManager(context, storageManager)
+
+    @Provides
+    @Singleton
     fun provideTransferEngine(
         @ApplicationContext context: Context,
         storageManager: StorageManager,
@@ -167,7 +189,10 @@ object AppModule {
         transportOrchestrator: TransportOrchestrator,
         persistenceManager: TransferPersistenceManager,
         duplicateDetector: com.astron.app.core.storage.DuplicateDetector,
-        transferQueue: com.astron.app.transfer.TransferQueue
+        transferQueue: com.astron.app.transfer.TransferQueue,
+        bleBeaconManager: com.astron.app.transport.ble.BleBeaconManager,
+        upnpPortMapper: com.astron.app.transport.upnp.UpnpPortMapper,
+        multicastGroupManager: com.astron.app.transport.multicast.MulticastGroupManager
     ): TransferEngine = TransferEngine(
         context = context,
         storageManager = storageManager,
@@ -182,7 +207,10 @@ object AppModule {
         transportOrchestrator = transportOrchestrator,
         persistenceManager = persistenceManager,
         duplicateDetector = duplicateDetector,
-        transferQueue = transferQueue
+        transferQueue = transferQueue,
+        bleBeaconManager = bleBeaconManager,
+        upnpPortMapper = upnpPortMapper,
+        multicastGroupManager = multicastGroupManager
     )
 }
 

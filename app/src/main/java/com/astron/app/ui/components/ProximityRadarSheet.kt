@@ -363,6 +363,39 @@ fun ProximityRadarSheet(
                     Text("Optical Air-Gap", color = TextSecondary, fontSize = 11.sp)
                 }
             }
+
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(SurfaceSubtle)
+                    .border(1.dp, BorderLight, RoundedCornerShape(14.dp))
+                    .clickable {
+                        val groupPeer = PeerDevice(
+                            id = "multicast-group",
+                            name = "Wi-Fi Multicast Group",
+                            hostAddress = "239.255.42.99",
+                            port = 52738,
+                            transportType = TransportType.MULTICAST_GROUP,
+                            model = "1-to-Many FEC Broadcast"
+                        )
+                        onSelectPeer(groupPeer)
+                    }
+                    .padding(vertical = 12.dp, horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Radar,
+                    contentDescription = null,
+                    tint = com.astron.app.ui.theme.StellarViolet,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text("Multicast", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("1-to-Many Room", color = TextSecondary, fontSize = 11.sp)
+                }
+            }
         }
     }
 }

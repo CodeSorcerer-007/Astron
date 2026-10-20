@@ -288,4 +288,67 @@ class LanTransportIntegrationTest {
             assertEquals(LanTransport.OP_CANCEL, result)
         }
     }
+
+    @Test
+    fun testOpFileResumeWireTransmission() = runBlocking {
+        val serverSocket = ServerSocket(0)
+        val port = serverSocket.localPort
+
+        val serverJob = async(Dispatchers.IO) {
+            val client = serverSocket.accept()
+            val inStream = DataInputStream(BufferedInputStream(client.getInputStream()))
+            val outStream = DataOutputStream(BufferedOutputStream(client.getOutputStream()))
+
+            val opHandshake = inStream.readByte()
+            assertEquals(LanTransport.OP_HANDSHAKE_REQ, opHandshake)
+            val sessionId = inStream.readUTF()
+            val deviceName = inStream.readUTF()
+            val token = inStream.readUTF()
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_RESP.toInt())
+            outStream.flush()
+
+            // Next opcode must be OP_FILE_RESUME
+            val resumeOp = inStream.readByte()
+            assertEquals(LanTransport.OP_FILE_RESUME, resumeOp)
+            val itemId = inStream.readUTF()
+            val resumeOffset = inStream.readLong()
+
+            client.close()
+            serverSocket.close()
+
+            Triple(resumeOp, itemId, resumeOffset)
+        }
+
+        val clientJob = async(Dispatchers.IO) {
+            val socket = Socket("127.0.0.1", port)
+            val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
+            val inStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
+
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_REQ.toInt())
+            outStream.writeUTF("session-resume")
+            outStream.writeUTF("Device-Resume")
+            outStream.writeUTF("token-resume-1234")
+            outStream.flush()
+
+            val resp = inStream.readByte()
+            assertEquals(LanTransport.OP_HANDSHAKE_RESP, resp)
+
+            // Send OP_FILE_RESUME
+            outStream.writeByte(LanTransport.OP_FILE_RESUME.toInt())
+            outStream.writeUTF("item-file-resume-1")
+            outStream.writeLong(1048576L) // 1 MB offset
+            outStream.flush()
+
+            socket.close()
+        }
+
+        withTimeout(5_000) {
+            val (op, id, offset) = serverJob.await()
+            clientJob.await()
+            assertEquals(LanTransport.OP_FILE_RESUME, op)
+            assertEquals("item-file-resume-1", id)
+            assertEquals(1048576L, offset)
+        }
+    }
 }
+

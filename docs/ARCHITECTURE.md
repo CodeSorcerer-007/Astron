@@ -87,6 +87,22 @@ Astron adheres to clean architectural separation with distinct layers:
     - `ULTRA` (512 Bytes/frame): High throughput for 4K / macro smartphone lenses.
   - **Missing Frame Diagnostics**: `ReceiverSession` tracks sparse frame indices (`getMissingFrameIndices()`), allowing real-time UI reporting of dropped frames.
 
+- **`ble/BleBeaconManager.kt` (BLE Background Beaconing)**:
+  - Low-power Bluetooth Low Energy advertising (`ASTRON_SERVICE_UUID: 0000a570-0000-1000-8000-00805f9b34fb`) and scanning.
+  - Allows instant peer discovery even when one device's screen is locked or Wi-Fi is sleeping.
+  - 16-byte packed frame encoding device name, capabilities bitmask, and listening port with calibrated RSSI proximity mapping.
+
+- **`upnp/UpnpPortMapper.kt` (UPnP / NAT-PMP WAN Port Mapping)**:
+  - SSDP M-SEARCH discovery of router Internet Gateway Devices (IGD).
+  - SOAP RPC control protocol injecting temporary dynamic port mappings (`52737` -> `192.168.1.X:52737`) with automatic lease teardown.
+  - Enables direct peer-to-peer socket transfers across the public internet without third-party relay servers.
+
+- **`multicast/MulticastGroupManager.kt` (Wi-Fi Multicast 1-to-Many Group)**:
+  - 1-to-many UDP Multicast engine streaming on `239.255.42.99:52738`.
+  - Distributes the exact same file batch to dozens of devices simultaneously in classrooms, conferences, or field operations without sequential re-transmissions.
+  - **Forward Error Correction (FEC)**: Packs 1 XOR parity packet per 4 data chunks, allowing dropped packets to be mathematically recovered in memory with 0 ms latency.
+
+
 ---
 
 ### 2.3 Transfer Management Layer (`com.astron.app.transfer` & `service`)

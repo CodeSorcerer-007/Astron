@@ -5,5 +5,4 @@
     <external-media-path name="external_media" path="." />
     <files-path name="app_files" path="." />
     <cache-path name="app_cache" path="." />
-    <root-path name="root" path="." />
 </paths>
