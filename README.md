@@ -1,6 +1,20 @@
+<div align="center">
+
+<img src="Logo.png" alt="Astron Logo" width="180" />
+
 # 🪐 Astron — God-Tier Android Local & Remote File Transfer
 
 > *"Whatever the file. Whatever the network. Whatever the distance. Just send it."*
+
+[![Platform](https://img.shields.io/badge/Platform-Android_7.0+_(API_24+)--36-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://android.com)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
+[![Tests](https://img.shields.io/badge/Tests-17_Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](docs/TEST_REPORT.md)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+
+</div>
+
+---
 
 **Astron** is the definitive, all-in-one native Android file transfer application built with modern Kotlin, Jetpack Compose, Material 3, and Coroutines. Inspired by the deep cosmic aesthetic of its ringed-planet insignia, Astron elevates Android file sharing to the **God-Tier**: combining multi-stream LAN acceleration, Wi-Fi Direct P2P, autonomous hotspot mode, Bluetooth Classic RFCOMM, remote Internet Relay WebSocket streaming, zero-install Web Drop for cross-platform sharing, adaptive optical LightDrop, Room SQLite crash-safe byte-level resumability, a built-in categorized file explorer, and rich multi-format file previews.
 
