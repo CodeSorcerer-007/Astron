@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.astron.app.ui.components.CosmicStarfield
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -150,85 +151,94 @@ fun SendScreen(
         }
     }
 
-    Scaffold(
-        containerColor = CanvasLight,
-        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
-        topBar = {
-            TopAppBar(
-                title = { Text("Select Files & Apps", color = TextPrimary, fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextPrimary
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showDirectQrScanner = true }) {
-                        Icon(
-                            imageVector = Icons.Default.QrCodeScanner,
-                            contentDescription = "Scan Receiver QR",
-                            tint = CosmicCyan
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CanvasLight)
-            )
-        },
-        bottomBar = {
-            if (selectedItems.isNotEmpty()) {
-                val totalBytes = selectedItems.sumOf { it.size }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(SurfaceLight)
-                        .border(1.dp, BorderLight, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "${selectedItems.size} items ready",
-                                color = TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = NetworkUtils.formatBytes(totalBytes),
-                                color = CosmicCyan,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
+    Box(modifier = Modifier.fillMaxSize().background(CanvasLight)) {
+        CosmicStarfield(starCount = 35)
+
+        Scaffold(
+            containerColor = Color.Transparent,
+            modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+            topBar = {
+                TopAppBar(
+                    title = { Text("Select Files & Apps", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = TextPrimary
                             )
                         }
-
-                        Button(
-                            onClick = {
-                                hapticEngine?.heavyClick() ?: haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.startDiscovery()
-                                showRadarSheet = true
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = CosmicCyan,
-                                contentColor = Color.White
-                            ),
-                            modifier = Modifier.height(48.dp)
+                    },
+                    actions = {
+                        IconButton(onClick = { showDirectQrScanner = true }) {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = "Scan Receiver QR",
+                                tint = CosmicCyan
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                )
+            },
+            bottomBar = {
+                if (selectedItems.isNotEmpty()) {
+                    val totalBytes = selectedItems.sumOf { it.size }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(SurfaceLight)
+                            .border(1.dp, BorderLight, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                            .padding(20.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.NearMe, contentDescription = "Send", modifier = Modifier.size(18.dp), tint = Color.White)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Send", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${selectedItems.size} items ready",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = NetworkUtils.formatBytes(totalBytes),
+                                    color = CosmicCyan,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Button(
+                                onClick = {
+                                    hapticEngine?.heavyClick() ?: haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.startDiscovery()
+                                    showRadarSheet = true
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = CosmicCyan,
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.height(48.dp)
+                            ) {
+                                Icon(Icons.Default.NearMe, contentDescription = "Send", modifier = Modifier.size(18.dp), tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Send", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+                            }
                         }
                     }
                 }
             }
-        }
-    ) { padding ->
+        ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -616,6 +626,7 @@ fun SendScreen(
                     onNavigateToLightDrop()
                 }
             )
+        }
         }
     }
 

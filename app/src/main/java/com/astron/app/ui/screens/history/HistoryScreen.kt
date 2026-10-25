@@ -68,41 +68,44 @@ fun HistoryScreen(
     val historyList by viewModel.historyRecords.collectAsState()
     val dateFormat = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
-    Scaffold(
-        containerColor = CanvasLight,
-        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
-        topBar = {
-            TopAppBar(
-                title = { Text("Transfer History", color = TextPrimary, fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextPrimary
-                        )
-                    }
-                },
-                actions = {
-                    if (historyList.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.clearHistory() }) {
+    Box(modifier = Modifier.fillMaxSize().background(CanvasLight)) {
+        com.astron.app.ui.components.CosmicStarfield(starCount = 35)
+
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+            topBar = {
+                TopAppBar(
+                    title = { Text("Transfer History", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateBack) {
                             Icon(
-                                imageVector = Icons.Default.DeleteSweep,
-                                contentDescription = "Clear History",
-                                tint = TextSecondary
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = TextPrimary
                             )
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CanvasLight)
-            )
-        }
-    ) { padding ->
-        if (historyList.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                    },
+                    actions = {
+                        if (historyList.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.clearHistory() }) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteSweep,
+                                    contentDescription = "Clear History",
+                                    tint = TextSecondary
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
+                )
+            }
+        ) { padding ->
+            if (historyList.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -179,19 +182,25 @@ fun HistoryScreen(
                                 text = record.peerName,
                                 color = TextPrimary,
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "${record.fileCount} files • ${NetworkUtils.formatBytes(record.totalBytes)}",
                                 color = TextSecondary,
-                                fontSize = 12.sp
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "$dateStr • ${record.transportType.displayName}",
                                 color = TextSecondary.copy(alpha = 0.7f),
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
 
@@ -237,4 +246,5 @@ fun HistoryScreen(
             }
         }
     }
+}
 }

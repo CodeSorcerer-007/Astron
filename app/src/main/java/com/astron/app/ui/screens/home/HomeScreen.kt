@@ -159,6 +159,7 @@ fun HomeScreen(
                 // Device Identity Pill (Opens Diagnostics)
                 Row(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(999.dp))
                         .background(SurfaceLight)
                         .border(1.dp, BorderLight, RoundedCornerShape(999.dp))
@@ -169,89 +170,94 @@ fun HomeScreen(
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(if (localIp != null) EmeraldVerified else CrimsonError, CircleShape)
-                )
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(if (localIp != null) EmeraldVerified else CrimsonError, CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = deviceName,
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = deviceName,
-                    color = TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
 
-            // Action Icons: Built-in File Explorer, Transfer History, Settings
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = {
-                    hapticEngine?.click() ?: haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (onNavigateToFileBrowser != null) {
-                        onNavigateToFileBrowser()
-                    } else {
-                        AppFileManager.openDownloadsFolder(context)
+                // Action Icons: Built-in File Explorer, Transfer History, Settings
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        hapticEngine?.click() ?: haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (onNavigateToFileBrowser != null) {
+                            onNavigateToFileBrowser()
+                        } else {
+                            AppFileManager.openDownloadsFolder(context)
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = "Built-in File Explorer",
+                            tint = TextSecondary
+                        )
                     }
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = "Built-in File Explorer",
-                        tint = TextSecondary
-                    )
+                    IconButton(onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onNavigateToHistory()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = "Transfer History",
+                            tint = TextSecondary
+                        )
+                    }
+                    IconButton(onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onNavigateToSettings()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = TextSecondary
+                        )
+                    }
                 }
-                IconButton(onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onNavigateToHistory()
-                }) {
+            }
+
+            // Wi-Fi Disconnected Warning Banner if no local IP
+            if (localIp == null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(CrimsonError.copy(alpha = 0.08f))
+                        .border(1.dp, CrimsonError.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                        .clickable { viewModel.refreshState() }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = "Transfer History",
-                        tint = TextSecondary
+                        imageVector = Icons.Default.WarningAmber,
+                        contentDescription = "Wi-Fi Warning",
+                        tint = CrimsonError,
+                        modifier = Modifier.size(18.dp)
                     )
-                }
-                IconButton(onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onNavigateToSettings()
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = TextSecondary
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "No Wi-Fi detected. Connect to Wi-Fi or use LightDrop (Optical).",
+                        color = CrimsonError,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
-        }
 
-        // Wi-Fi Disconnected Warning Banner if no local IP
-        if (localIp == null) {
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(CrimsonError.copy(alpha = 0.08f))
-                    .border(1.dp, CrimsonError.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-                    .clickable { viewModel.refreshState() }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.WarningAmber,
-                    contentDescription = "Wi-Fi Warning",
-                    tint = CrimsonError,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "No Wi-Fi detected. Connect to Wi-Fi or use LightDrop (Optical).",
-                    color = CrimsonError,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
         // Astron Logo Hero
         AstronLogoHeader(compact = true)
@@ -278,7 +284,10 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.WarningAmber,
                                 contentDescription = null,
@@ -290,7 +299,9 @@ fun HomeScreen(
                                 text = "Interrupted Transfer Detected",
                                 color = TextPrimary,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         IconButton(onClick = { viewModel.dismissInterruptedSession(session.sessionId) }) {
@@ -355,7 +366,10 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Storage,
                             contentDescription = "Storage",
@@ -396,13 +410,18 @@ fun HomeScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "${NetworkUtils.formatBytes(usedStorage)} of ${NetworkUtils.formatBytes(totalStorage)} used",
                         color = TextSecondary,
-                        fontSize = 11.sp
+                        fontSize = 11.sp,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "IP: ${localIp ?: "Offline"}",
                         color = if (localIp != null) CosmicCyan else TextSecondary,
@@ -439,7 +458,10 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
                             .size(46.dp)
@@ -455,7 +477,7 @@ fun HomeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.width(16.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "SEND",
                             color = Color.White,
@@ -467,10 +489,14 @@ fun HomeScreen(
                             text = "Photos, videos, files & APKs",
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -508,7 +534,10 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
                             .size(46.dp)
@@ -524,7 +553,7 @@ fun HomeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.width(16.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "RECEIVE",
                             color = TextPrimary,
@@ -536,10 +565,14 @@ fun HomeScreen(
                             text = "Make visible & show pairing QR",
                             color = TextSecondary,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -572,7 +605,10 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -588,7 +624,7 @@ fun HomeScreen(
                             )
                         }
                         Spacer(modifier = Modifier.width(14.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "FILE EXPLORER",
                                 color = TextPrimary,
@@ -599,10 +635,14 @@ fun HomeScreen(
                             Text(
                                 text = "Browse photos, videos, docs & APKs with live previews",
                                 color = TextSecondary,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -621,7 +661,7 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Installed Apps (APK) Quick Launcher
-            Row(
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(16.dp))
@@ -631,24 +671,43 @@ fun HomeScreen(
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         showAppPickerSheet = true
                     }
-                    .padding(vertical = 12.dp, horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 12.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = Icons.Default.Android,
-                    contentDescription = "Share Apps",
-                    tint = StellarViolet,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text("Apps (APK)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("Extract APK", color = TextSecondary, fontSize = 10.sp)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(StellarViolet.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Android,
+                        contentDescription = "Share Apps",
+                        tint = StellarViolet,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Apps (APK)",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Extract APK",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             // Web Drop Pill
-            Row(
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(16.dp))
@@ -658,24 +717,43 @@ fun HomeScreen(
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onNavigateToWebDrop()
                     }
-                    .padding(vertical = 12.dp, horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 12.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = Icons.Default.Wifi,
-                    contentDescription = "Web Drop",
-                    tint = CosmicCyan,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text("Web Drop", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("Browser Share", color = TextSecondary, fontSize = 10.sp)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(CosmicCyan.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Wifi,
+                        contentDescription = "Web Drop",
+                        tint = CosmicCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Web Drop",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Browser Share",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             // Light Drop Pill (Zero-Radio)
-            Row(
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(16.dp))
@@ -685,20 +763,39 @@ fun HomeScreen(
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onNavigateToLightDrop()
                     }
-                    .padding(vertical = 12.dp, horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 12.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = Icons.Default.FlashOn,
-                    contentDescription = "Light Drop",
-                    tint = ElectricBlue,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text("Light Drop", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("Optical Air-Gap", color = TextSecondary, fontSize = 10.sp)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(ElectricBlue.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FlashOn,
+                        contentDescription = "Light Drop",
+                        tint = ElectricBlue,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Light Drop",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Optical Air-Gap",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
 
@@ -1065,13 +1162,21 @@ private fun DiagnosticItem(label: String, value: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = label, color = TextSecondary, fontSize = 12.sp)
+        Text(
+            text = label,
+            color = TextSecondary,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(0.42f)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = value,
             color = TextPrimary,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            modifier = Modifier.weight(0.58f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
     }

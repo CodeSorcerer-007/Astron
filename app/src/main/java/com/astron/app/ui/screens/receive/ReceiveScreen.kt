@@ -250,7 +250,9 @@ fun ReceiveScreen(
                         text = if (isHotspotMode) "Hotspot Mode Active (${hotspotConfig?.ssid ?: "Starting..."})" else "No Wi-Fi? Switch to Direct Hotspot",
                         color = if (isHotspotMode) CosmicCyan else TextPrimary,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
 

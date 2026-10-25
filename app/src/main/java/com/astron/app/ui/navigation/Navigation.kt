@@ -97,14 +97,23 @@ fun MainNavigation(
         }
     }
 
-    AnimatedContent(
-        targetState = currentScreen,
-        transitionSpec = {
-            (fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.97f, animationSpec = tween(220)))
-                .togetherWith(fadeOut(animationSpec = tween(180)))
-        },
-        label = "navigation"
-    ) { screen ->
+    var showIntroSplash by rememberSaveable {
+        mutableStateOf(initialUris.isEmpty() && initialNfcPayload == null)
+    }
+
+    if (showIntroSplash) {
+        com.astron.app.ui.components.CosmicIntroSplash(
+            onSplashFinished = { showIntroSplash = false }
+        )
+    } else {
+        AnimatedContent(
+            targetState = currentScreen,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(280)) + scaleIn(initialScale = 0.96f, animationSpec = tween(280)))
+                    .togetherWith(fadeOut(animationSpec = tween(200)))
+            },
+            label = "navigation"
+        ) { screen ->
         when (screen) {
             Screen.HOME -> HomeScreen(
                 onNavigateToSend = { items ->
@@ -163,6 +172,7 @@ fun MainNavigation(
             )
         }
     }
+}
 }
 
 

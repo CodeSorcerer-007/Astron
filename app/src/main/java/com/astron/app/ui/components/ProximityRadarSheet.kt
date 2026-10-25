@@ -281,16 +281,22 @@ fun ProximityRadarSheet(
                                     text = peer.name,
                                     color = TextPrimary,
                                     fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "Ready • ${peer.transportType.badge} • ${peer.hostAddress}",
                                     color = CosmicCyan,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
+
+                            Spacer(modifier = Modifier.width(8.dp))
 
                             Box(
                                 modifier = Modifier
@@ -316,17 +322,17 @@ fun ProximityRadarSheet(
         // Alternative modes
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(14.dp))
                     .background(SurfaceSubtle)
                     .border(1.dp, BorderLight, RoundedCornerShape(14.dp))
                     .clickable { onWebDropSelected() }
-                    .padding(vertical = 12.dp, horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 10.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
                     imageVector = Icons.Default.Wifi,
@@ -334,22 +340,33 @@ fun ProximityRadarSheet(
                     tint = CosmicCyan,
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text("Web Drop", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Browser share", color = TextSecondary, fontSize = 11.sp)
-                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Web Drop",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Browser",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
 
-            Row(
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(14.dp))
                     .background(SurfaceSubtle)
                     .border(1.dp, BorderLight, RoundedCornerShape(14.dp))
                     .clickable { onLightDropSelected() }
-                    .padding(vertical = 12.dp, horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 10.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
                     imageVector = Icons.Default.FlashOn,
@@ -357,14 +374,25 @@ fun ProximityRadarSheet(
                     tint = ElectricBlue,
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text("Light Drop", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("Optical Air-Gap", color = TextSecondary, fontSize = 11.sp)
-                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Light Drop",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Optical",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
 
-            Row(
+            Column(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(14.dp))
@@ -381,8 +409,8 @@ fun ProximityRadarSheet(
                         )
                         onSelectPeer(groupPeer)
                     }
-                    .padding(vertical = 12.dp, horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 10.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
                     imageVector = Icons.Default.Radar,
@@ -390,11 +418,22 @@ fun ProximityRadarSheet(
                     tint = com.astron.app.ui.theme.StellarViolet,
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text("Multicast", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("1-to-Many Room", color = TextSecondary, fontSize = 11.sp)
-                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Multicast",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "1-to-Many",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
         }
     }
