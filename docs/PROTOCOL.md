@@ -76,11 +76,19 @@ For each file item in the manifest:
 ┌───────────────────────────┬──────────────────────────────────────────┐
 │ Offset Marker (8 bytes)   │ Int64 BE start byte offset (for resume) │
 ├───────────────────────────┼──────────────────────────────────────────┤
-│ Stream Payload (N bytes)  │ Raw binary chunks (64 KB - 256 KB each) │
+│ Stream Payload (N bytes)  │ Adaptive binary chunks (32 KB - 512 KB)  │
 ├───────────────────────────┼──────────────────────────────────────────┤
 │ SHA-256 Digest (32 bytes) │ Hardware SHA-256 validation digest       │
 └───────────────────────────┴──────────────────────────────────────────┘
 ```
+
+#### Dynamic Chunk RTT Adaptation Mechanism:
+Astron dynamically calibrates chunk payload sizes based on live round-trip latency (RTT) measured during the TCP handshake and real-time socket write durations:
+- **RTT < 15ms (Wi-Fi 7 / MLO / Multi-gigabit LAN)**: 512 KB chunks to minimize framing overhead and maximize channel saturation.
+- **RTT < 40ms (5 GHz Wi-Fi)**: 256 KB chunks.
+- **RTT < 100ms (Standard Wi-Fi)**: 128 KB chunks.
+- **RTT < 200ms (Jittery / Congested Wi-Fi)**: 64 KB chunks.
+- **RTT >= 200ms / High Jitter**: 32 KB chunks with socket backpressure back-off.
 
 When all file bytes are streamed, the receiver checks the calculated SHA-256 hash against the manifest. If valid, the file is atomically committed to `Downloads/Astron/`.
 
@@ -232,4 +240,32 @@ To guarantee resilience against network drops, battery exhaustion, or process te
    - The sender seeks the file pointer using `RandomAccessFile.seek(startOffset)` or skip-stream.
    - The receiver re-opens the target `.astron_tmp` file with `StorageManager.FileWriteSession.seekTo(startOffset)` to resume writing seamlessly at the exact broken byte.
 3. **Atomic Finalization**: Only when all file bytes are received and verified with SHA-256 is the temporary file atomically renamed to its permanent filename.
+
+---
+
+## 10. NFC Beam Handshake & Multi-Radio Transport Negotiation
+
+For zero-tap instant pairing between physical devices held back-to-back:
+- **MIME Type**: `application/vnd.com.astron.transfer`
+- **NDEF Payload Schema (`NfcPairingPayload`)**:
+  ```json
+  {
+    "deviceName": "Astron S24 Ultra",
+    "hostIp": "192.168.1.188",
+    "port": 52737,
+    "sessionToken": "tok_beam_a79f12",
+    "transportType": "LAN",
+    "hotspotSsid": "Astron-SoftAP-Node",
+    "hotspotPass": "passphrase123",
+    "bluetoothMac": "AA:BB:CC:DD:EE:FF",
+    "wifiDirectMac": "12:34:56:78:9A:BC",
+    "preferredTransport": "AUTO",
+    "supportedTransports": ["LAN", "WIFI_DIRECT", "BLUETOOTH", "HOTSPOT"]
+  }
+  ```
+- **Negotiation Priority Hierarchy**:
+  1. `LOCAL_WIFI` (if both on same subnet and IP is reachable).
+  2. `WIFI_DIRECT` (if Wi-Fi Direct P2P radio is active).
+  3. `HOTSPOT` (if receiver is advertising autonomous SoftAP credentials).
+  4. `BLUETOOTH` (universal offline fallback when Wi-Fi radios are unavailable).
 

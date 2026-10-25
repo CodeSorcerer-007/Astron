@@ -109,7 +109,8 @@ object AstronNotificationHelper {
         transferred: Long,
         total: Long,
         speedBps: Long,
-        isPaused: Boolean
+        isPaused: Boolean,
+        isMuted: Boolean = com.astron.app.core.util.SoundFeedbackManager.isMuted
     ): Notification {
         initChannels(context)
 
@@ -152,6 +153,17 @@ object AstronNotificationHelper {
             context,
             12,
             pauseResumeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Mute / Unmute Action
+        val muteIntent = Intent(context, TransferForegroundService::class.java).apply {
+            action = TransferForegroundService.ACTION_TOGGLE_MUTE
+        }
+        val pendingMute = PendingIntent.getService(
+            context,
+            13,
+            muteIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -211,6 +223,13 @@ object AstronNotificationHelper {
                 pendingPauseResume
             )
         }
+
+        // Add Mute / Unmute Chimes action button
+        builder.addAction(
+            if (isMuted) android.R.drawable.ic_lock_silent_mode_off else android.R.drawable.ic_lock_silent_mode,
+            if (isMuted) "Unmute" else "Mute",
+            pendingMute
+        )
 
         // Add Cancel action button
         builder.addAction(

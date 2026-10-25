@@ -56,16 +56,19 @@ Astron adheres to clean architectural separation with distinct layers:
 - **`util/`**:
   - `NetworkUtils.kt`: Discovers local active IPv4 addresses across Wi-Fi and SoftAP hotspot interfaces.
   - `PairingUtils.kt`: Generates and parses unified `astron://pair` QR codes and standard `WIFI:S:..;P:..;;` format.
-  - `SoundFeedbackManager.kt`: Hardware-synthesized tone chimes for Transfer Start, Incoming Alerts, and Verified Completion.
+  - `SoundFeedbackManager.kt`: Hardware-synthesized tone chimes for Transfer Start, Incoming Alerts, and Verified Completion with global one-tap mute state.
   - `QrCodeGenerator.kt`: High-contrast QR bitmaps via ZXing.
+- **`nfc/NfcManager.kt`**:
+  - NDEF tap-to-pair with automated multi-radio handshake negotiation (Wi-Fi Direct, Bluetooth, LAN, Hotspot) when devices are held back-to-back.
 
 ---
 
 ### 2.2 Transport Layer (`com.astron.app.transport`)
 
-- **`lan/LanTransport.kt` (Multi-Stream TCP)**:
+- **`lan/LanTransport.kt` (Multi-Stream TCP & Dynamic RTT Scaling)**:
   - **Discovery**: Zero-configuration discovery using `NsdManager` advertising `_astron._tcp.` on port `52737`.
   - **Multi-Stream Socket Acceleration**: When `TransferPriority.MAX_SPEED` is enabled and multiple files are queued, spawns up to **3 parallel TCP sockets** with `sessionToken` authorization, saturating high-bandwidth 5 GHz/6 GHz channels up to 80+ MB/s.
+  - **Dynamic Chunk RTT Adaptation**: Automatically measures handshake and streaming round-trip time (RTT), dynamically scaling chunk buffer sizes from 32 KB (on high-jitter or congested links) up to 512 KB (on ultra-low latency Wi-Fi 7 / MLO connections).
   - **Session Approval Cache**: Maintains an in-memory `approvedSessions` concurrent set so parallel streams for the same transfer batch bypass duplicate authorization dialogs.
   - **Socket Tuning**: Enforces `tcpNoDelay = true` and dynamic `sendBufferSize`/`receiveBufferSize` scaling from 64 KB up to 256 KB.
 
@@ -115,7 +118,7 @@ Astron adheres to clean architectural separation with distinct layers:
 - **`TransferForegroundService.kt`**:
   - Foreground service with `FOREGROUND_SERVICE_TYPE_DATA_SYNC`.
   - Maintains `PARTIAL_WAKE_LOCK` and Wi-Fi lock during active transfers to prevent Android Doze mode throttling.
-  - Interactive notification with live progress bar and pause/cancel actions.
+  - Interactive notification with live progress bar, pause/resume, cancel, and a quick-action "Mute/Unmute Chimes" toggle for silent background transfers.
 
 ---
 

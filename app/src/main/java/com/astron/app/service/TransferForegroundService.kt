@@ -31,6 +31,7 @@ class TransferForegroundService : Service() {
         const val ACTION_STOP = "com.astron.app.action.STOP_TRANSFER"
         const val ACTION_CANCEL = "com.astron.app.action.CANCEL_TRANSFER"
         const val ACTION_PAUSE_RESUME = "com.astron.app.action.PAUSE_RESUME_TRANSFER"
+        const val ACTION_TOGGLE_MUTE = "com.astron.app.action.TOGGLE_MUTE"
 
         const val EXTRA_PEER_NAME = "extra_peer_name"
         const val EXTRA_PROGRESS = "extra_progress"
@@ -239,6 +240,25 @@ class TransferForegroundService : Service() {
                         notificationManager.notify(NOTIFICATION_ID, notification)
                     } catch (t: Throwable) {
                         Log.e(TAG, "Error toggling pause from notification", t)
+                    }
+                }
+                ACTION_TOGGLE_MUTE -> {
+                    try {
+                        val isMuted = com.astron.app.core.util.SoundFeedbackManager.toggleMute()
+                        val isPaused = try { transferEngine.isPaused.value } catch (_: Throwable) { false }
+                        val notification = AstronNotificationHelper.buildTransferNotification(
+                            context = this,
+                            peerName = peerName,
+                            currentFile = lastFile,
+                            transferred = lastTransferred,
+                            total = lastTotal,
+                            speedBps = if (isPaused) 0L else lastSpeed,
+                            isPaused = isPaused,
+                            isMuted = isMuted
+                        )
+                        notificationManager.notify(NOTIFICATION_ID, notification)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Error toggling mute from notification", t)
                     }
                 }
                 ACTION_STOP -> {

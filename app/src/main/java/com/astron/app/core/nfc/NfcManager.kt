@@ -23,15 +23,33 @@ data class NfcPairingPayload(
     val sessionToken: String = "",
     val transportType: String = "LAN",
     val hotspotSsid: String? = null,
-    val hotspotPass: String? = null
+    val hotspotPass: String? = null,
+    val bluetoothMac: String? = null,
+    val wifiDirectMac: String? = null,
+    val preferredTransport: String = "AUTO",
+    val supportedTransports: List<String> = listOf("LAN", "WIFI_DIRECT", "BLUETOOTH", "HOTSPOT")
 ) {
     fun toPeerDevice(): PeerDevice {
+        val resolvedTransport = when (preferredTransport.uppercase()) {
+            "WIFI_DIRECT", "P2P" -> TransportType.WIFI_DIRECT
+            "BLUETOOTH", "BT" -> TransportType.BLUETOOTH
+            "HOTSPOT" -> TransportType.HOTSPOT
+            "LAN", "LOCAL_WIFI" -> TransportType.LOCAL_WIFI
+            else -> {
+                when {
+                    !hotspotSsid.isNullOrBlank() -> TransportType.HOTSPOT
+                    transportType == "P2P" || !wifiDirectMac.isNullOrBlank() -> TransportType.WIFI_DIRECT
+                    !bluetoothMac.isNullOrBlank() && hostIp.isBlank() -> TransportType.BLUETOOTH
+                    else -> TransportType.LOCAL_WIFI
+                }
+            }
+        }
         return PeerDevice(
-            id = "$hostIp:$port",
+            id = if (hostIp.isNotBlank()) "$hostIp:$port" else (bluetoothMac ?: "$deviceName:nfc"),
             name = deviceName,
             hostAddress = hostIp,
             port = port,
-            transportType = if (transportType == "P2P") TransportType.WIFI_DIRECT else TransportType.LOCAL_WIFI,
+            transportType = resolvedTransport,
             model = "NFC Tap Paired",
             isTrusted = true,
             signalStrength = 100,
@@ -165,5 +183,34 @@ object NfcManager {
             )
             method.invoke(adapter, null, activity, emptyArray<Activity>())
         } catch (_: Throwable) {}
+    }
+
+    /**
+     * Negotiates the optimal bidirectional transport between two tapped devices
+     * based on local radio capabilities and remote NDEF parameters.
+     */
+    fun negotiatePreferredTransport(
+        localCapabilities: Set<TransportType>,
+        remotePayload: NfcPairingPayload
+    ): TransportType {
+        val requested = when (remotePayload.preferredTransport.uppercase()) {
+            "WIFI_DIRECT", "P2P" -> TransportType.WIFI_DIRECT
+            "HOTSPOT" -> TransportType.HOTSPOT
+            "BLUETOOTH", "BT" -> TransportType.BLUETOOTH
+            "LAN", "LOCAL_WIFI" -> TransportType.LOCAL_WIFI
+            else -> null
+        }
+        if (requested != null && localCapabilities.contains(requested)) {
+            return requested
+        }
+
+        // Priority order: LAN > WIFI_DIRECT > HOTSPOT > BLUETOOTH
+        return when {
+            localCapabilities.contains(TransportType.LOCAL_WIFI) && remotePayload.hostIp.isNotBlank() -> TransportType.LOCAL_WIFI
+            localCapabilities.contains(TransportType.WIFI_DIRECT) && (!remotePayload.wifiDirectMac.isNullOrBlank() || remotePayload.transportType == "P2P" || remotePayload.supportedTransports.contains("WIFI_DIRECT")) -> TransportType.WIFI_DIRECT
+            localCapabilities.contains(TransportType.HOTSPOT) && !remotePayload.hotspotSsid.isNullOrBlank() -> TransportType.HOTSPOT
+            localCapabilities.contains(TransportType.BLUETOOTH) && !remotePayload.bluetoothMac.isNullOrBlank() -> TransportType.BLUETOOTH
+            else -> TransportType.LOCAL_WIFI
+        }
     }
 }

@@ -9,7 +9,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android_7.0+_(API_24+)--36-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![Tests](https://img.shields.io/badge/Tests-102_Passing_(100%25)-success?style=for-the-badge&logo=checkmarx&logoColor=white)](docs/TEST_REPORT.md)
+[![Tests](https://img.shields.io/badge/Tests-125_Passing_(100%25)-success?style=for-the-badge&logo=checkmarx&logoColor=white)](docs/TEST_REPORT.md)
 [![Rating](https://img.shields.io/badge/Score-10%2F10+_Gold_Master_Plus-gold?style=for-the-badge&logo=starship&logoColor=black)](docs/TEST_REPORT.md)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
@@ -31,7 +31,7 @@
 | **4. Fault Tolerance & Resumability** | **10 / 10+** | ⚡ Flawless | Byte-level `RandomAccessFile` seek/resume (`OP_FILE_RESUME = 0x09`), Room SQLite WAL crash checkpoints across reboots. |
 | **5. UI/UX, Design Polish & Sensory Feel** | **10 / 10+** | ✨ God-Tier | Cosmic deep-space theme, radial nebula aura, twinkling `CosmicStarfield` with star flares, cubic Bézier `SpeedGraphView` with glowing halos, synthesized acoustic chimes, tactile haptics. |
 | **6. File Management & Media Previews** | **10 / 10+** | 👑 Unmatched | MediaStore categorizer, installed APK direct extractor, native Media3 ExoPlayer, `PdfRenderer`, ZIP internal tree inspection. |
-| **7. Test Quality & Verification** | **10 / 10+** | 💯 Perfect | 102/102 tests passing across 21 suites (100% pass rate, 0 failures, 0 regressions). |
+| **7. Test Quality & Verification** | **10 / 10+** | 💯 Perfect | 125/125 tests passing across 22 suites (100% pass rate, 0 failures, 0 regressions). |
 
 ---
 

@@ -8,9 +8,9 @@ This report documents the verification and test validation results for **Astron 
 
 - **Test Framework**: JUnit 4 / Kotlin Coroutines Test
 - **Execution Target**: JVM Unit & Integration Tests (`.\gradlew.bat testDebugUnitTest`)
-- **Total Test Suites**: 21
-- **Total Tests**: 102
-- **Passed**: 102 (100%)
+- **Total Test Suites**: 22
+- **Total Tests**: 125
+- **Passed**: 125 (100%)
 - **Failed**: 0 (0%)
 - **Regressions**: 0
 
@@ -94,8 +94,12 @@ This report documents the verification and test validation results for **Astron 
 | :--- | :--- | :--- | :--- |
 | `LAN-001` | **Loopback TCP Transfer** | 128 KB payload over localhost socket with pause & resume | **PASSED** — 100% data integrity verified by SHA-256 |
 | `LAN-002` | **Chunked Resume & Seek** | Sequential writes followed by `seekTo(offset)` overwrite | **PASSED** — correct byte alignment and offset resumption |
+| `LAN-003` | **Dynamic Chunk RTT Adaptation** | Measuring RTT across 5ms–250ms latency profiles | **PASSED** — scales dynamically from 32 KB to 512 KB |
 | `HOT-001` | **Hotspot Pairing QR** | Embedding SSID and WPA2 passphrase into `astron://pair` | **PASSED** — parsed with backwards compatibility |
 | `HOT-002` | **Wi-Fi Connect String** | Standard `WIFI:S:..;T:WPA;P:..;;` format | **PASSED** — compliant with Android/iOS camera scanners |
+| `NFC-001` | **Extended Beam Handshake** | NDEF payload with Bluetooth, Wi-Fi Direct & preferred radio | **PASSED** — parsed & verified with round-trip fidelity |
+| `NFC-002` | **Multi-Radio Negotiation** | Auto-resolving transport based on local device capabilities | **PASSED** — correctly prioritizes LAN > P2P > Hotspot > BT |
+| `SND-001` | **Notification Mute Toggle** | Toggling global audio feedback state | **PASSED** — safe execution with chimes muted |
 
 ### 2.3 Optical Transport (Light Drop) Multi-Density
 | Test ID | Objective | Input / Condition | Result |

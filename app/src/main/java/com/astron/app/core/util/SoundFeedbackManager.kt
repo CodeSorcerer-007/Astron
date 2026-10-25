@@ -13,6 +13,19 @@ class SoundFeedbackManager : Closeable {
 
     companion object {
         const val TAG = "SoundFeedbackManager"
+
+        @Volatile
+        var isMuted: Boolean = false
+            private set
+
+        fun setMuted(muted: Boolean) {
+            isMuted = muted
+        }
+
+        fun toggleMute(): Boolean {
+            isMuted = !isMuted
+            return isMuted
+        }
     }
 
     private var toneGenerator: ToneGenerator? = try {
@@ -28,7 +41,7 @@ class SoundFeedbackManager : Closeable {
      * Plays a high-tech cosmic chirp when a file transfer session begins.
      */
     fun playTransferStart(soundEnabled: Boolean = true) {
-        if (!soundEnabled) return
+        if (isMuted || !soundEnabled) return
         scope.launch {
             try {
                 toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
@@ -42,7 +55,7 @@ class SoundFeedbackManager : Closeable {
      * Plays a two-stage harmonious confirmation chime when files are cryptographically verified and transfer completes.
      */
     fun playTransferComplete(soundEnabled: Boolean = true) {
-        if (!soundEnabled) return
+        if (isMuted || !soundEnabled) return
         scope.launch {
             try {
                 toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 120)
@@ -58,7 +71,7 @@ class SoundFeedbackManager : Closeable {
      * Plays an alert pulse when an incoming peer requests file transfer approval.
      */
     fun playIncomingAlert(soundEnabled: Boolean = true) {
-        if (!soundEnabled) return
+        if (isMuted || !soundEnabled) return
         scope.launch {
             try {
                 toneGenerator?.startTone(ToneGenerator.TONE_PROP_PROMPT, 180)

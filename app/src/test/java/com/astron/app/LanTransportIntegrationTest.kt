@@ -556,5 +556,28 @@ class LanTransportIntegrationTest {
             assertTrue(clientJob.await())
         }
     }
+
+    @Test
+    fun testCalculateDynamicChunkSizeAcrossRttTiers() {
+        // Ultra-low latency (Wi-Fi 7 / MLO / < 15ms) -> 512 KB max speed
+        val ultraLowRtt = LanTransport.calculateDynamicChunkSize(5L, com.astron.app.core.model.TransferPriority.MAX_SPEED)
+        assertEquals(512 * 1024, ultraLowRtt)
+
+        // Balanced tier at 8ms RTT -> 256 KB
+        val balancedLow = LanTransport.calculateDynamicChunkSize(8L, com.astron.app.core.model.TransferPriority.BALANCED)
+        assertEquals(256 * 1024, balancedLow)
+
+        // Moderate RTT (25ms) -> 128 KB
+        val moderateRtt = LanTransport.calculateDynamicChunkSize(25L, com.astron.app.core.model.TransferPriority.BALANCED)
+        assertEquals(128 * 1024, moderateRtt)
+
+        // High jitter (80ms) -> 64 KB
+        val jitterRtt = LanTransport.calculateDynamicChunkSize(80L, com.astron.app.core.model.TransferPriority.BALANCED)
+        assertEquals(64 * 1024, jitterRtt)
+
+        // High latency (> 200ms) -> 32 KB minimum boundary
+        val highLatencyRtt = LanTransport.calculateDynamicChunkSize(250L, com.astron.app.core.model.TransferPriority.BALANCED)
+        assertEquals(32 * 1024, highLatencyRtt)
+    }
 }
 

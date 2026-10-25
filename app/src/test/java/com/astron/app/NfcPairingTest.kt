@@ -119,4 +119,59 @@ class NfcPairingTest {
         assertNull(restored?.hotspotSsid)
         assertNull(restored?.hotspotPass)
     }
+
+    @Test
+    fun testNfcPayloadWithExtendedBeamNegotiation() {
+        val payload = NfcPairingPayload(
+            deviceName = "Galaxy S24 Ultra",
+            hostIp = "192.168.1.55",
+            port = 52737,
+            sessionToken = "tok_beam_42",
+            transportType = "P2P",
+            bluetoothMac = "AA:BB:CC:DD:EE:FF",
+            wifiDirectMac = "12:34:56:78:9A:BC",
+            preferredTransport = "WIFI_DIRECT",
+            supportedTransports = listOf("WIFI_DIRECT", "BLUETOOTH", "LAN")
+        )
+
+        val json = payload.toJson()
+        val restored = NfcPairingPayload.fromJson(json)
+
+        assertNotNull(restored)
+        assertEquals("Galaxy S24 Ultra", restored?.deviceName)
+        assertEquals("AA:BB:CC:DD:EE:FF", restored?.bluetoothMac)
+        assertEquals("12:34:56:78:9A:BC", restored?.wifiDirectMac)
+        assertEquals("WIFI_DIRECT", restored?.preferredTransport)
+        assertTrue(restored!!.supportedTransports.contains("BLUETOOTH"))
+
+        val peer = restored.toPeerDevice()
+        assertEquals(TransportType.WIFI_DIRECT, peer.transportType)
+        assertEquals("Galaxy S24 Ultra", peer.name)
+    }
+
+    @Test
+    fun testNfcManagerNegotiatePreferredTransport() {
+        val remotePayload = NfcPairingPayload(
+            deviceName = "Receiver Device",
+            hostIp = "192.168.1.100",
+            port = 52737,
+            wifiDirectMac = "AA:11:22:33:44:55",
+            preferredTransport = "AUTO"
+        )
+
+        val directCaps = setOf(TransportType.WIFI_DIRECT, TransportType.LOCAL_WIFI)
+        val negotiated = com.astron.app.core.nfc.NfcManager.negotiatePreferredTransport(directCaps, remotePayload)
+        assertEquals(TransportType.LOCAL_WIFI, negotiated)
+
+        // Remote prefers Wi-Fi Direct
+        val p2pPayload = remotePayload.copy(preferredTransport = "WIFI_DIRECT")
+        val negotiatedP2p = com.astron.app.core.nfc.NfcManager.negotiatePreferredTransport(directCaps, p2pPayload)
+        assertEquals(TransportType.WIFI_DIRECT, negotiatedP2p)
+
+        // Offline / No LAN, only Bluetooth
+        val btCaps = setOf(TransportType.BLUETOOTH)
+        val btPayload = remotePayload.copy(hostIp = "", bluetoothMac = "00:11:22:33:44:55", preferredTransport = "BLUETOOTH")
+        val negotiatedBt = com.astron.app.core.nfc.NfcManager.negotiatePreferredTransport(btCaps, btPayload)
+        assertEquals(TransportType.BLUETOOTH, negotiatedBt)
+    }
 }

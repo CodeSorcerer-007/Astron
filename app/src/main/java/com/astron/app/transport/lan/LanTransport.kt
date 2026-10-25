@@ -48,12 +48,35 @@ class LanTransport(
         const val SERVICE_TYPE = "_astron._tcp."
         const val DEFAULT_PORT = 52737
         const val CHUNK_BUFFER_SIZE = 128 * 1024 // 128 KB chunk buffer default
+        const val MIN_CHUNK_SIZE = 32 * 1024 // 32 KB minimum buffer for jittery links
+        const val MAX_CHUNK_SIZE = 512 * 1024 // 512 KB maximum buffer for high-bandwidth Wi-Fi 7 / 6E
 
         fun getChunkBufferSize(priority: TransferPriority): Int = when (priority) {
             TransferPriority.MAX_SPEED -> 256 * 1024
             TransferPriority.BALANCED -> 128 * 1024
             TransferPriority.BATTERY_SAVER -> 64 * 1024
             TransferPriority.RELIABILITY -> 32 * 1024
+        }
+
+        /**
+         * Dynamically scales chunk buffer size between 32 KB and 512 KB based on
+         * measured socket round-trip time (RTT) and transfer priority.
+         *
+         * - RTT < 15ms (Ultra low-latency Wi-Fi 7 / MLO / LAN gigabit): 512 KB
+         * - RTT < 40ms (Fast 5 GHz Wi-Fi): 256 KB
+         * - RTT < 100ms (Standard Wi-Fi): 128 KB
+         * - RTT < 200ms (Congested / Jittery Wi-Fi): 64 KB
+         * - RTT >= 200ms (Severe jitter / Weak signal): 32 KB
+         */
+        fun calculateDynamicChunkSize(rttMs: Long, priority: TransferPriority = TransferPriority.BALANCED): Int {
+            val base = getChunkBufferSize(priority)
+            return when {
+                rttMs < 15 -> (base * 2).coerceIn(MIN_CHUNK_SIZE, MAX_CHUNK_SIZE)
+                rttMs < 40 -> base.coerceIn(MIN_CHUNK_SIZE, 256 * 1024)
+                rttMs < 100 -> (base / 2).coerceIn(MIN_CHUNK_SIZE, 128 * 1024)
+                rttMs < 200 -> 64 * 1024
+                else -> MIN_CHUNK_SIZE
+            }
         }
 
         // Packet OpCodes
@@ -271,7 +294,8 @@ class LanTransport(
             val outStream = DataOutputStream(BufferedOutputStream(primarySocket.getOutputStream(), chunkSize))
             val inStream = DataInputStream(BufferedInputStream(primarySocket.getInputStream()))
 
-            // 1. Handshake with session token for wire encryption
+            // 1. Handshake with session token for wire encryption and RTT measurement
+            val handshakeStartNs = System.nanoTime()
             outStream.writeByte(OP_HANDSHAKE_REQ.toInt())
             outStream.writeUTF(manifest.sessionId)
             outStream.writeUTF(manifest.senderDeviceName)
@@ -279,10 +303,15 @@ class LanTransport(
             outStream.flush()
 
             val respOp = inStream.readByte()
+            val rttMs = ((System.nanoTime() - handshakeStartNs) / 1_000_000L).coerceAtLeast(1L)
             if (respOp != OP_HANDSHAKE_RESP) {
                 Log.e(TAG, "Invalid handshake response from receiver")
                 return@withContext false
             }
+
+            // Dynamically scale chunk buffer size based on real-time RTT
+            val dynamicChunkSize = calculateDynamicChunkSize(rttMs, priority)
+            Log.d(TAG, "Dynamic chunk size adapted to ${dynamicChunkSize / 1024} KB (RTT=${rttMs}ms, priority=$priority)")
 
             // 2. Send Manifest JSON
             val manifestJson = json.encodeToString(manifest)
@@ -307,7 +336,7 @@ class LanTransport(
                     outStream = outStream,
                     itemQueue = itemQueue,
                     sessionKey = sessionKey,
-                    chunkSize = chunkSize,
+                    chunkSize = dynamicChunkSize,
                     manifest = manifest,
                     priority = priority,
                     totalTransferred = totalTransferred,
@@ -326,7 +355,7 @@ class LanTransport(
                                     outStream = outStream,
                                     itemQueue = itemQueue,
                                     sessionKey = sessionKey,
-                                    chunkSize = chunkSize,
+                                    chunkSize = dynamicChunkSize,
                                     manifest = manifest,
                                     priority = priority,
                                     totalTransferred = totalTransferred,
@@ -367,7 +396,7 @@ class LanTransport(
                                                 outStream = workerOut,
                                                 itemQueue = itemQueue,
                                                 sessionKey = sessionKey,
-                                                chunkSize = chunkSize,
+                                                chunkSize = dynamicChunkSize,
                                                 manifest = manifest,
                                                 priority = priority,
                                                 totalTransferred = totalTransferred,
@@ -418,7 +447,8 @@ class LanTransport(
         isCancelled: () -> Boolean,
         awaitUnpause: suspend () -> Unit
     ): Boolean {
-        val buffer = ByteArray(chunkSize)
+        var currentChunkSize = chunkSize
+        var buffer = ByteArray(currentChunkSize)
 
         while (true) {
             val item = itemQueue.poll() ?: break
@@ -458,7 +488,7 @@ class LanTransport(
             }
             outStream.flush()
 
-            // Stream chunks
+            // Stream chunks with dynamic RTT backpressure adaptation
             var bytesRead: Int
             var fileTransferred = 0L
 
@@ -474,9 +504,21 @@ class LanTransport(
                     val plainChunk = if (bytesRead == buffer.size) buffer else buffer.copyOf(bytesRead)
                     val encryptedChunk = CryptoManager.encryptAesGcm(plainChunk, sessionKey)
 
+                    val writeStart = System.currentTimeMillis()
                     outStream.writeByte(OP_CHUNK.toInt())
                     outStream.writeInt(encryptedChunk.size)
                     outStream.write(encryptedChunk)
+                    outStream.flush()
+                    val writeDuration = System.currentTimeMillis() - writeStart
+
+                    // Dynamic adaptation: back off chunk size if socket buffer stalls
+                    if (writeDuration > 300 && currentChunkSize > MIN_CHUNK_SIZE) {
+                        currentChunkSize = (currentChunkSize / 2).coerceAtLeast(MIN_CHUNK_SIZE)
+                        buffer = ByteArray(currentChunkSize)
+                    } else if (writeDuration < 15 && currentChunkSize < MAX_CHUNK_SIZE && priority == TransferPriority.MAX_SPEED) {
+                        currentChunkSize = (currentChunkSize * 2).coerceAtMost(MAX_CHUNK_SIZE)
+                        buffer = ByteArray(currentChunkSize)
+                    }
 
                     fileTransferred += bytesRead
                     val total = totalTransferred.addAndGet(bytesRead.toLong())
