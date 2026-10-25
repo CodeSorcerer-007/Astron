@@ -41,7 +41,8 @@ enum class Screen {
 @Composable
 fun MainNavigation(
     initialUris: List<Uri> = emptyList(),
-    initialNfcPayload: com.astron.app.core.nfc.NfcPairingPayload? = null
+    initialNfcPayload: com.astron.app.core.nfc.NfcPairingPayload? = null,
+    initialDestination: String? = null
 ) {
     val backStack = rememberSaveable(
         saver = listSaver(
@@ -98,7 +99,19 @@ fun MainNavigation(
     }
 
     var showIntroSplash by rememberSaveable {
-        mutableStateOf(initialUris.isEmpty() && initialNfcPayload == null)
+        mutableStateOf(initialUris.isEmpty() && initialNfcPayload == null && initialDestination.isNullOrBlank())
+    }
+
+    androidx.compose.runtime.LaunchedEffect(initialDestination) {
+        if (!initialDestination.isNullOrBlank()) {
+            showIntroSplash = false
+            when (initialDestination.lowercase()) {
+                "transfer" -> if (currentScreen != Screen.TRANSFER) navigateTo(Screen.TRANSFER)
+                "history" -> if (currentScreen != Screen.HISTORY) navigateTo(Screen.HISTORY)
+                "receive" -> if (currentScreen != Screen.RECEIVE) navigateTo(Screen.RECEIVE)
+                "webdrop" -> if (currentScreen != Screen.WEBDROP) navigateTo(Screen.WEBDROP)
+            }
+        }
     }
 
     if (showIntroSplash) {

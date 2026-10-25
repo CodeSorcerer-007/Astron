@@ -18,6 +18,7 @@ import com.astron.app.core.util.SoundFeedbackManager
 import com.astron.app.data.HistoryRepository
 import com.astron.app.data.PreferencesRepository
 import com.astron.app.data.db.TransferPersistenceManager
+import com.astron.app.service.AstronNotificationHelper
 import com.astron.app.service.TransferForegroundService
 import com.astron.app.transport.CapabilityDetector
 import com.astron.app.transport.TransportOrchestrator
@@ -542,9 +543,23 @@ class TransferEngine(
                     startSendTransfer(nextBatch.targetPeer, nextBatch.items)
                 } else {
                     TransferForegroundService.stop(context)
+                    AstronNotificationHelper.showTransferCompleteNotification(
+                        context = context,
+                        peerName = peer.name,
+                        fileCount = items.size,
+                        totalBytes = totalBytes,
+                        isSender = true
+                    )
                 }
             } else {
                 TransferForegroundService.stop(context)
+                if (!isCancelledFlag) {
+                    AstronNotificationHelper.showTransferFailedNotification(
+                        context = context,
+                        peerName = peer.name,
+                        reason = "Connection lost or transfer interrupted"
+                    )
+                }
                 persistenceManager?.markSessionCancelled(sessionId)
                 val finalState = if (isCancelledFlag) SessionState.CANCELLED else SessionState.FAILED
                 _currentSession.update { it?.copy(state = finalState) }
@@ -707,11 +722,19 @@ class TransferEngine(
                     val soundEnabled = preferencesRepository.soundEnabledFlow.first()
                     if (!autoAccept) {
                         soundFeedbackManager.playIncomingAlert(soundEnabled)
+                        AstronNotificationHelper.showIncomingTransferNotification(
+                            context = context,
+                            senderName = manifest.senderDeviceName,
+                            fileCount = manifest.totalFiles,
+                            totalBytes = manifest.totalBytes
+                        )
                     }
                     val approved = if (autoAccept) {
                         true
                     } else {
-                        onIncomingTransferPrompt?.invoke(manifest) ?: true
+                        val result = onIncomingTransferPrompt?.invoke(manifest) ?: true
+                        AstronNotificationHelper.dismissIncomingTransferNotification(context)
+                        result
                     }
 
                     if (approved) {
@@ -755,6 +778,13 @@ class TransferEngine(
                 onTransferCompleted = { sessionId ->
                     TransferForegroundService.stop(context)
                     val s = _currentSession.value
+                    AstronNotificationHelper.showTransferCompleteNotification(
+                        context = context,
+                        peerName = s?.manifest?.senderDeviceName ?: "Sender",
+                        fileCount = s?.items?.size ?: 1,
+                        totalBytes = s?.totalBytes ?: 0L,
+                        isSender = false
+                    )
                     _currentSession.update {
                         it?.copy(
                             state = SessionState.COMPLETED,
@@ -784,6 +814,14 @@ class TransferEngine(
                 },
                 onTransferFailed = { sessionId, error ->
                     TransferForegroundService.stop(context)
+                    val s = _currentSession.value
+                    if (!isCancelledFlag) {
+                        AstronNotificationHelper.showTransferFailedNotification(
+                            context = context,
+                            peerName = s?.manifest?.senderDeviceName ?: "Sender",
+                            reason = error
+                        )
+                    }
                     _currentSession.update { it?.copy(state = SessionState.FAILED) }
                     scope.launch(Dispatchers.IO) {
                         persistenceManager?.markSessionCancelled(sessionId)

@@ -32,6 +32,9 @@ class WebDropServer(
         const val DEFAULT_PORT = 8080
         const val MAX_UPLOAD_BYTES = 10L * 1024 * 1024 * 1024 // 10 GB
 
+        @Volatile
+        var activeInstance: WebDropServer? = null
+
         fun htmlEscape(s: String): String =
             s.replace("&", "&amp;")
                 .replace("<", "&lt;")
@@ -94,6 +97,7 @@ class WebDropServer(
                 bind(InetSocketAddress(port))
             }
             isRunning = true
+            activeInstance = this@WebDropServer
             onServerReady()
             Log.d(TAG, "WebDrop server running at: $webDropUrl")
 
@@ -118,6 +122,9 @@ class WebDropServer(
 
     fun stopServer() {
         isRunning = false
+        if (activeInstance === this) {
+            activeInstance = null
+        }
         try {
             executor?.shutdownNow()
         } catch (_: Exception) {}

@@ -125,6 +125,35 @@
             android:exported="false"
             android:foregroundServiceType="dataSync|connectedDevice" />
 
+        <!-- Notification Panel Interactive Action Receiver -->
+        <receiver
+            android:name=".service.NotificationActionReceiver"
+            android:exported="false" />
+
+        <!-- Quick Settings Tile in Notification Panel: Instant Receive Mode -->
+        <service
+            android:name=".service.AstronReceiveTileService"
+            android:label="Astron Receive"
+            android:icon="@drawable/ic_notification"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Quick Settings Tile in Notification Panel: Instant Web Drop -->
+        <service
+            android:name=".service.AstronWebDropTileService"
+            android:label="Astron Web Drop"
+            android:icon="@drawable/ic_notification"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- FileProvider for Secure File Opening and System Sharing -->
         <provider
             android:name="androidx.core.content.FileProvider"

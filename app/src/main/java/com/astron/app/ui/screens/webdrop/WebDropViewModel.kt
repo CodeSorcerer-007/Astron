@@ -8,6 +8,9 @@ import com.astron.app.core.util.NetworkUtils
 import com.astron.app.core.util.QrCodeGenerator
 import com.astron.app.data.PreferencesRepository
 import com.astron.app.transfer.TransferEngine
+import android.content.Context
+import com.astron.app.service.AstronNotificationHelper
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,6 +25,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class WebDropViewModel @Inject constructor(
+    @param:ApplicationContext private val context: Context,
     private val transferEngine: TransferEngine,
     private val preferencesRepository: PreferencesRepository
 ) : ViewModel() {
@@ -58,11 +62,13 @@ class WebDropViewModel @Inject constructor(
                 ?: "http://${NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"}:8080"
             _serverUrl.value = url
             _qrBitmap.value = QrCodeGenerator.generateQrBitmap(url, size = 320)
+            AstronNotificationHelper.showWebDropNotification(context, url)
         }
     }
 
     fun stopServer() {
         transferEngine.webDropServer.stopServer()
+        AstronNotificationHelper.dismissWebDropNotification(context)
     }
 
     override fun onCleared() {

@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
 
     private val _sharedUris = mutableStateOf<List<Uri>>(emptyList())
     private val _nfcPayload = mutableStateOf<com.astron.app.core.nfc.NfcPairingPayload?>(null)
+    private val _navDestination = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +48,10 @@ class MainActivity : ComponentActivity() {
         if (nfc != null) {
             hapticManager.heavyClick()
             _nfcPayload.value = nfc
+        }
+        val nav = intent?.getStringExtra(com.astron.app.service.AstronNotificationHelper.EXTRA_NAVIGATE_TO)
+        if (!nav.isNullOrBlank()) {
+            _navDestination.value = nav
         }
 
         setContent {
@@ -64,7 +69,8 @@ class MainActivity : ComponentActivity() {
                     ) {
                         val uris by remember { _sharedUris }
                         val nfcData by remember { _nfcPayload }
-                        MainNavigation(initialUris = uris, initialNfcPayload = nfcData)
+                        val navTarget by remember { _navDestination }
+                        MainNavigation(initialUris = uris, initialNfcPayload = nfcData, initialDestination = navTarget)
                     }
                 }
             }
@@ -82,6 +88,10 @@ class MainActivity : ComponentActivity() {
         if (nfc != null) {
             hapticManager.heavyClick()
             _nfcPayload.value = nfc
+        }
+        val nav = intent.getStringExtra(com.astron.app.service.AstronNotificationHelper.EXTRA_NAVIGATE_TO)
+        if (!nav.isNullOrBlank()) {
+            _navDestination.value = nav
         }
     }
 
