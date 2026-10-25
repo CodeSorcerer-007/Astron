@@ -13,6 +13,14 @@
 [![Rating](https://img.shields.io/badge/Score-10%2F10+_Gold_Master_Plus-gold?style=for-the-badge&logo=starship&logoColor=black)](docs/TEST_REPORT.md)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
+<br/>
+
+<a href="brag-output/astron-showcase.gif">
+  <img src="brag-output/astron-showcase.gif" alt="Astron 20-Second Cinematic Showcase" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(37, 99, 235, 0.3);" />
+</a>
+
+<p><em>🎬 <b>20-Second Cinematic Showcase:</b> Wi-Fi 7 MLO (250 MB/s), 12 Transports, Zero-Router Failover, and Room SQLite Crash-Safe Resume</em></p>
+
 </div>
 
 ---
