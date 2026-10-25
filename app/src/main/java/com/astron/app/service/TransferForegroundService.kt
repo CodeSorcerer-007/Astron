@@ -45,6 +45,9 @@ class TransferForegroundService : Service() {
         const val EXTRA_TRANSFERRED_BYTES = "extra_transferred_bytes"
         const val EXTRA_TOTAL_BYTES = "extra_total_bytes"
 
+        @Volatile
+        var activeInstance: TransferForegroundService? = null
+
         fun start(context: Context, peerName: String) {
             try {
                 val intent = Intent(context, TransferForegroundService::class.java).apply {
@@ -69,6 +72,11 @@ class TransferForegroundService : Service() {
             speedBps: Long,
             currentFile: String
         ) {
+            val instance = activeInstance
+            if (instance != null) {
+                instance.updateProgressDirect(peerName, transferred, total, speedBps, currentFile)
+                return
+            }
             try {
                 val intent = Intent(context, TransferForegroundService::class.java).apply {
                     action = ACTION_UPDATE
@@ -101,9 +109,16 @@ class TransferForegroundService : Service() {
     private var isForegroundActive = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var brandLogo: android.graphics.Bitmap? = null
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
+        brandLogo = try {
+            BitmapFactory.decodeResource(resources, R.drawable.astron_logo)
+        } catch (_: Throwable) {
+            null
+        }
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
     }
@@ -117,7 +132,7 @@ class TransferForegroundService : Service() {
                     "astron:transfer_wakelock"
                 )?.apply {
                     setReferenceCounted(false)
-                    acquire(15 * 60 * 1000L) // 15 min safety timeout
+                    acquire(6 * 60 * 60 * 1000L) // 6 hours safety timeout for large transfers
                 }
             }
             if (wifiLock == null) {
@@ -231,6 +246,31 @@ class TransferForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    fun updateProgressDirect(
+        peerName: String,
+        transferred: Long,
+        total: Long,
+        speed: Long,
+        currentFile: String
+    ) {
+        this.peerName = peerName
+        ensureForegroundStarted()
+        val progress = if (total > 0) ((transferred * 100) / total).toInt() else 0
+        val speedStr = NetworkUtils.formatSpeed(speed)
+        val transferredStr = "${NetworkUtils.formatBytes(transferred)} / ${NetworkUtils.formatBytes(total)}"
+
+        val notification = buildNotification(
+            progressPercent = progress,
+            contentTitle = "Transferring: $currentFile",
+            contentText = "$transferredStr • $speedStr • $progress%"
+        )
+        try {
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Notification post failed", t)
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -275,12 +315,6 @@ class TransferForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val brandLogo = try {
-            BitmapFactory.decodeResource(resources, R.drawable.astron_logo)
-        } catch (_: Throwable) {
-            null
-        }
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(contentTitle)
             .setContentText(contentText)
@@ -319,6 +353,9 @@ class TransferForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        if (activeInstance === this) {
+            activeInstance = null
+        }
         releaseLocks()
         super.onDestroy()
     }

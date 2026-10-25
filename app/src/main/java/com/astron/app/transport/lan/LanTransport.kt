@@ -66,6 +66,9 @@ class LanTransport(
         const val OP_TRANSFER_COMPLETE: Byte = 0x07
         const val OP_CANCEL: Byte = 0x08
         const val OP_FILE_RESUME: Byte = 0x09
+        const val OP_MANIFEST_ACK: Byte = 0x0A
+
+        const val MAX_ALLOWED_CHUNK_SIZE = 1024 * 1024 // 1 MB sanity limit
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -82,6 +85,7 @@ class LanTransport(
     private var isDiscovering = false
     private val connectionSemaphore = Semaphore(3)
     private val approvedSessions = ConcurrentHashMap.newKeySet<String>()
+    private val sessionProgressMap = ConcurrentHashMap<String, AtomicLong>()
 
     /**
      * Starts advertising this device on the local network via NSD (mDNS).
@@ -242,10 +246,26 @@ class LanTransport(
 
         var primarySocket: Socket? = null
         try {
-            primarySocket = Socket().apply {
-                tcpNoDelay = true
-                sendBufferSize = chunkSize
-                connect(InetSocketAddress(peer.hostAddress, peer.port), 10_000)
+            var lastConnectEx: Exception? = null
+            for (attempt in 1..3) {
+                try {
+                    val s = Socket().apply {
+                        tcpNoDelay = true
+                        keepAlive = true
+                        sendBufferSize = chunkSize
+                        connect(InetSocketAddress(peer.hostAddress, peer.port), 7_000)
+                    }
+                    primarySocket = s
+                    break
+                } catch (e: Exception) {
+                    lastConnectEx = e
+                    if (attempt < 3 && !isCancelled()) {
+                        kotlinx.coroutines.delay(250L * attempt)
+                    }
+                }
+            }
+            if (primarySocket == null) {
+                throw lastConnectEx ?: java.io.IOException("Could not connect to ${peer.hostAddress}:${peer.port}")
             }
 
             val outStream = DataOutputStream(BufferedOutputStream(primarySocket.getOutputStream(), chunkSize))
@@ -271,6 +291,13 @@ class LanTransport(
             outStream.writeInt(manifestBytes.size)
             outStream.write(manifestBytes)
             outStream.flush()
+
+            // Wait for receiver manifest approval before streaming chunks
+            val manifestAck = inStream.readByte()
+            if (manifestAck != OP_MANIFEST_ACK && manifestAck != OP_HANDSHAKE_RESP) {
+                Log.w(TAG, "Transfer was cancelled or rejected by receiver (ack=$manifestAck)")
+                return@withContext false
+            }
 
             val maxStreams = if (priority == TransferPriority.MAX_SPEED && items.size > 1) 3.coerceAtMost(items.size) else 1
 
@@ -313,6 +340,7 @@ class LanTransport(
                                 try {
                                     workerSocket = Socket().apply {
                                         tcpNoDelay = true
+                                        keepAlive = true
                                         sendBufferSize = chunkSize
                                         connect(InetSocketAddress(peer.hostAddress, peer.port), 10_000)
                                     }
@@ -333,32 +361,40 @@ class LanTransport(
                                         workerOut.write(manifestBytes)
                                         workerOut.flush()
 
-                                        sendStreamItems(
-                                            outStream = workerOut,
-                                            itemQueue = itemQueue,
-                                            sessionKey = sessionKey,
-                                            chunkSize = chunkSize,
-                                            manifest = manifest,
-                                            priority = priority,
-                                            totalTransferred = totalTransferred,
-                                            onProgress = onProgress,
-                                            onFileVerified = onFileVerified,
-                                            isCancelled = isCancelled,
-                                            awaitUnpause = awaitUnpause
-                                        )
+                                        val wAck = workerIn.readByte()
+                                        if (wAck == OP_MANIFEST_ACK || wAck == OP_HANDSHAKE_RESP) {
+                                            sendStreamItems(
+                                                outStream = workerOut,
+                                                itemQueue = itemQueue,
+                                                sessionKey = sessionKey,
+                                                chunkSize = chunkSize,
+                                                manifest = manifest,
+                                                priority = priority,
+                                                totalTransferred = totalTransferred,
+                                                onProgress = onProgress,
+                                                onFileVerified = onFileVerified,
+                                                isCancelled = isCancelled,
+                                                awaitUnpause = awaitUnpause
+                                            )
+                                        } else {
+                                            false
+                                        }
                                     } else {
                                         false
                                     }
                                 } catch (e: Exception) {
-                                    Log.w(TAG, "Worker stream $streamIndex failed, falling back to primary", e)
-                                    false
+                                    Log.w(TAG, "Worker stream $streamIndex failed, primary stream will process remaining items", e)
+                                    true
                                 } finally {
                                     try { workerSocket?.close() } catch (_: Exception) {}
                                 }
                             }
                         }
                     }
-                    deferreds.awaitAll().any { it }
+                    deferreds.awaitAll().let { results ->
+                        // Primary stream (index 0) must succeed and all items in queue must be completed
+                        results.isNotEmpty() && results.first() && itemQueue.isEmpty()
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -395,7 +431,18 @@ class LanTransport(
 
             val uri = android.net.Uri.parse(item.uriString)
             val startOffset = item.transferredBytes
-            val inputStream = storageManager.openInputStreamAtOffset(uri, startOffset)
+            val inputStream = try {
+                storageManager.openInputStreamAtOffset(uri, startOffset)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error opening input stream for ${item.name}", e)
+                null
+            }
+
+            if (inputStream == null) {
+                // Skip file and mark verified/failed to avoid stalling the queue
+                onFileVerified(item.id)
+                continue
+            }
 
             if (startOffset > 0L) {
                 outStream.writeByte(OP_FILE_RESUME.toInt())
@@ -462,6 +509,8 @@ class LanTransport(
         onIncomingRequest: suspend (manifest: TransferManifest) -> Boolean,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
         onFileCompleted: (fileId: String, file: File, checksumVerified: Boolean) -> Unit,
+        onTransferCompleted: ((sessionId: String) -> Unit)? = null,
+        onTransferFailed: ((sessionId: String, error: String) -> Unit)? = null,
         isCancelled: () -> Boolean,
         awaitUnpause: suspend () -> Unit = {}
     ) = withContext(Dispatchers.IO) {
@@ -482,6 +531,7 @@ class LanTransport(
                     }
 
                     clientSocket.tcpNoDelay = true
+                    clientSocket.keepAlive = true
                     clientSocket.receiveBufferSize = chunkSize
 
                     // Handle each transfer with bounded concurrent connection limit
@@ -497,6 +547,8 @@ class LanTransport(
                                 onIncomingRequest,
                                 onProgress,
                                 onFileCompleted,
+                                onTransferCompleted,
+                                onTransferFailed,
                                 isCancelled,
                                 awaitUnpause
                             )
@@ -519,10 +571,13 @@ class LanTransport(
         onIncomingRequest: suspend (manifest: TransferManifest) -> Boolean,
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
         onFileCompleted: (fileId: String, file: File, checksumVerified: Boolean) -> Unit,
+        onTransferCompleted: ((sessionId: String) -> Unit)? = null,
+        onTransferFailed: ((sessionId: String, error: String) -> Unit)? = null,
         isCancelled: () -> Boolean,
         awaitUnpause: suspend () -> Unit = {}
     ) = withContext(Dispatchers.IO) {
         var currentWriteSession: StorageManager.FileWriteSession? = null
+        var manifest: TransferManifest? = null
         try {
             val inStream = DataInputStream(BufferedInputStream(socket.getInputStream(), chunkSize))
             val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
@@ -555,16 +610,17 @@ class LanTransport(
             val manifestBytes = ByteArray(manifestLen)
             inStream.readFully(manifestBytes)
 
-            val manifest = json.decodeFromString<TransferManifest>(String(manifestBytes, Charsets.UTF_8))
+            val parsedManifest = json.decodeFromString<TransferManifest>(String(manifestBytes, Charsets.UTF_8))
+            manifest = parsedManifest
 
             // Ask user for approval if not already approved for this session
-            val isAlreadyApproved = approvedSessions.contains(manifest.sessionId)
+            val isAlreadyApproved = approvedSessions.contains(parsedManifest.sessionId)
             val approved = if (isAlreadyApproved) {
                 true
             } else {
-                val userApproved = onIncomingRequest(manifest)
+                val userApproved = onIncomingRequest(parsedManifest)
                 if (userApproved) {
-                    approvedSessions.add(manifest.sessionId)
+                    approvedSessions.add(parsedManifest.sessionId)
                 }
                 userApproved
             }
@@ -576,10 +632,14 @@ class LanTransport(
                 return@withContext
             }
 
-            var totalReceived = 0L
+            // Acknowledge manifest acceptance to sender
+            outStream.writeByte(OP_MANIFEST_ACK.toInt())
+            outStream.flush()
+
+            val sessionTransferred = sessionProgressMap.getOrPut(parsedManifest.sessionId) { AtomicLong(0L) }
 
             // Map of file metadata by ID
-            val manifestMap = manifest.items.associateBy { it.id }
+            val manifestMap = parsedManifest.items.associateBy { it.id }
 
             // 3. Receive Files
             var currentFile: File? = null
@@ -596,16 +656,15 @@ class LanTransport(
 
                         currentItem = manifestMap[fileId]
                         val relPath = currentItem?.relativePath ?: ""
-                        currentFile = storageManager.prepareDestinationFile(
+                        val target = storageManager.prepareDestinationFile(
                             fileName,
                             relPath,
                             com.astron.app.core.model.DuplicateAction.KEEP_BOTH
                         )
+                        currentFile = target
                         currentFileBytes = 0L
                         currentWriteSession?.close()
-                        currentFile?.let { target ->
-                            currentWriteSession = storageManager.openWriteSession(target, 0L)
-                        }
+                        currentWriteSession = storageManager.openWriteSession(target, 0L)
                     }
                     OP_FILE_RESUME -> {
                         val fileId = inStream.readUTF()
@@ -615,20 +674,20 @@ class LanTransport(
 
                         currentItem = manifestMap[fileId]
                         val relPath = currentItem?.relativePath ?: ""
-                        currentFile = storageManager.prepareDestinationFile(
+                        val target = storageManager.prepareDestinationFile(
                             fileName,
                             relPath,
-                            com.astron.app.core.model.DuplicateAction.KEEP_BOTH
+                            com.astron.app.core.model.DuplicateAction.KEEP_BOTH,
+                            isResume = true
                         )
+                        currentFile = target
                         currentFileBytes = resumeOffset
                         currentWriteSession?.close()
-                        currentFile?.let { target ->
-                            currentWriteSession = storageManager.openWriteSession(target, resumeOffset)
-                        }
+                        currentWriteSession = storageManager.openWriteSession(target, resumeOffset)
                     }
                     OP_CHUNK -> {
                         val chunkLen = inStream.readInt()
-                        if (chunkLen <= 0 || chunkLen > (chunkSize + 64) * 2) {
+                        if (chunkLen <= 0 || chunkLen > MAX_ALLOWED_CHUNK_SIZE) {
                             socket.close()
                             return@withContext
                         }
@@ -640,9 +699,9 @@ class LanTransport(
                         awaitUnpause()
                         currentWriteSession?.writeChunk(plainChunk, plainChunk.size)
                         currentFileBytes += plainChunk.size
-                        totalReceived += plainChunk.size
+                        val totalSoFar = sessionTransferred.addAndGet(plainChunk.size.toLong())
                         currentFile?.let { target ->
-                            onProgress(totalReceived, manifest.totalBytes, target.name)
+                            onProgress(totalSoFar, parsedManifest.totalBytes, target.name)
                         }
                     }
                     OP_FILE_END -> {
@@ -665,15 +724,25 @@ class LanTransport(
                         currentItem = null
                     }
                     OP_TRANSFER_COMPLETE -> {
+                        outStream.writeByte(OP_TRANSFER_COMPLETE.toInt())
+                        outStream.flush()
+                        sessionProgressMap.remove(parsedManifest.sessionId)
+                        onTransferCompleted?.invoke(parsedManifest.sessionId)
                         break
                     }
                     OP_CANCEL -> {
+                        sessionProgressMap.remove(parsedManifest.sessionId)
+                        onTransferFailed?.invoke(parsedManifest.sessionId, "Cancelled by sender")
                         break
                     }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling incoming LAN transfer", e)
+            manifest?.sessionId?.let { sId ->
+                sessionProgressMap.remove(sId)
+                onTransferFailed?.invoke(sId, e.message ?: "Transfer error")
+            }
         } finally {
             try { currentWriteSession?.close() } catch (_: Exception) {}
             try { socket.close() } catch (_: Exception) {}
@@ -686,5 +755,6 @@ class LanTransport(
         } catch (_: Exception) {}
         serverSocket = null
         approvedSessions.clear()
+        sessionProgressMap.clear()
     }
 }

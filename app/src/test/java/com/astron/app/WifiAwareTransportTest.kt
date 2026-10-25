@@ -47,4 +47,26 @@ class WifiAwareTransportTest {
         )
         assertTrue(errorMsg.isNotEmpty())
     }
+
+    @Test
+    fun testServiceConstants() {
+        org.junit.Assert.assertEquals("com.astron.transfer", WifiAwareTransport.AWARE_SERVICE_NAME)
+    }
+
+    @Test
+    fun testIsSupportedAndAvailableReturnWithoutException() {
+        // Must never throw even on dummy context / emulated environments
+        val supported = transport.isSupported()
+        val available = transport.isAvailable()
+        assertFalse(available) // dummy context has null WifiAwareManager
+    }
+
+    @Test
+    fun testStartAdvertisingAndDiscoveryWithoutActiveSessionIsNoOp() {
+        // Without active session, should cleanly no-op and not throw
+        transport.startAdvertising("Test-Device")
+        transport.startDiscovery()
+        assertFalse(transport.isSessionActive.value)
+        assertTrue(transport.discoveredPeers.value.isEmpty())
+    }
 }

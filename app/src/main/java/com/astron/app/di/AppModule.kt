@@ -175,6 +175,20 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideWifiAwareTransport(
+        @ApplicationContext context: Context
+    ): com.astron.app.transport.aware.WifiAwareTransport =
+        com.astron.app.transport.aware.WifiAwareTransport(context)
+
+    @Provides
+    @Singleton
+    fun provideUsbOtgManager(
+        @ApplicationContext context: Context
+    ): com.astron.app.transport.usb.UsbOtgManager =
+        com.astron.app.transport.usb.UsbOtgManager(context)
+
+    @Provides
+    @Singleton
     fun provideTransferEngine(
         @ApplicationContext context: Context,
         storageManager: StorageManager,
@@ -192,7 +206,10 @@ object AppModule {
         transferQueue: com.astron.app.transfer.TransferQueue,
         bleBeaconManager: com.astron.app.transport.ble.BleBeaconManager,
         upnpPortMapper: com.astron.app.transport.upnp.UpnpPortMapper,
-        multicastGroupManager: com.astron.app.transport.multicast.MulticastGroupManager
+        multicastGroupManager: com.astron.app.transport.multicast.MulticastGroupManager,
+        wifiAwareTransport: com.astron.app.transport.aware.WifiAwareTransport,
+        wifiDirectManager: com.astron.app.transport.p2p.WifiDirectManager,
+        usbOtgManager: com.astron.app.transport.usb.UsbOtgManager
     ): TransferEngine = TransferEngine(
         context = context,
         storageManager = storageManager,
@@ -210,7 +227,10 @@ object AppModule {
         transferQueue = transferQueue,
         bleBeaconManager = bleBeaconManager,
         upnpPortMapper = upnpPortMapper,
-        multicastGroupManager = multicastGroupManager
+        multicastGroupManager = multicastGroupManager,
+        wifiAwareTransport = wifiAwareTransport,
+        wifiDirectManager = wifiDirectManager,
+        usbOtgManager = usbOtgManager
     )
 }
 

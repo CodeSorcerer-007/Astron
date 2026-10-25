@@ -66,12 +66,18 @@ object PairingUtils {
             val rawPass = params["pass"]
             val pass = rawPass?.let { try { URLDecoder.decode(it, "UTF-8") } catch (_: Exception) { it } }
 
+            val transport = when {
+                ssid != null && ssid.startsWith("DIRECT-", ignoreCase = true) -> TransportType.WIFI_DIRECT
+                ssid != null -> TransportType.HOTSPOT
+                else -> TransportType.LOCAL_WIFI
+            }
+
             PeerDevice(
                 id = "peer-qr-$ip-$port",
                 name = name,
                 hostAddress = ip,
                 port = port,
-                transportType = if (ssid != null) TransportType.WIFI_DIRECT else TransportType.LOCAL_WIFI,
+                transportType = transport,
                 hotspotSsid = ssid,
                 hotspotPass = pass,
                 lastSeen = System.currentTimeMillis()

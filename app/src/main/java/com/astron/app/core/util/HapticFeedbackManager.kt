@@ -115,4 +115,19 @@ class HapticFeedbackManager(private val context: Context) {
             }
         } catch (_: Throwable) {}
     }
+
+    /**
+     * Crisp tactile milestone impulse fired when crossing transfer milestones (25%, 50%, 75%).
+     */
+    fun milestone() {
+        if (!isEnabled) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(20L)
+            }
+        } catch (_: Throwable) {}
+    }
 }

@@ -208,6 +208,7 @@ class WebDropServer(
                         val fileId = path.removePrefix("/download/")
                         val item = sharedFiles.find { it.id == fileId }
                         if (item != null) {
+                            try { client.soTimeout = 60_000 } catch (_: Exception) {}
                             serveFileDownload(item, outStream)
                         } else {
                             send404(outStream)
@@ -216,6 +217,7 @@ class WebDropServer(
                     else -> send404(outStream)
                 }
             } else if (method == "POST" && (path == "/upload" || path == "/api/upload")) {
+                try { client.soTimeout = 60_000 } catch (_: Exception) {}
                 val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
                 if (contentLength <= 0L) {
                     send400(outStream, "Missing or invalid Content-Length header")
@@ -239,7 +241,11 @@ class WebDropServer(
                 val targetFile = File(storageManager.getAstronDownloadDirectory(), fileName)
                 targetFile.parentFile?.mkdirs()
 
-                if (isEncrypted && contentLength <= 100 * 1024 * 1024L) {
+                if (isEncrypted) {
+                    if (contentLength > 50 * 1024 * 1024L) {
+                        send413(outStream, "Encrypted upload exceeds browser memory safe limit of 50 MB")
+                        return
+                    }
                     // Decrypt client-side AES-256-GCM uploaded payload
                     val encryptedBytes = ByteArray(contentLength.toInt())
                     var totalRead = 0
@@ -248,8 +254,17 @@ class WebDropServer(
                         if (read == -1) break
                         totalRead += read
                     }
+                    if (totalRead.toLong() < contentLength) {
+                        send400(outStream, "Premature end of upload stream")
+                        return
+                    }
                     val secretKey = CryptoManager.deriveKeyFromToken(sessionToken)
-                    val decrypted = CryptoManager.decryptAesGcm(encryptedBytes, secretKey)
+                    val decrypted = try {
+                        CryptoManager.decryptAesGcm(encryptedBytes, secretKey)
+                    } catch (t: Throwable) {
+                        send400(outStream, "Failed to decrypt upload payload: invalid key or corrupted stream")
+                        return
+                    }
                     targetFile.writeBytes(decrypted)
                 } else {
                     targetFile.outputStream().use { fos ->

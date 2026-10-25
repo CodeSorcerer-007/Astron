@@ -43,6 +43,9 @@
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
+    <!-- USB OTG / Host for Direct Physical Storage Transfer -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
     <!-- Storage & Media Permissions for In-App File Browser -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" tools:ignore="ScopedStorage" />

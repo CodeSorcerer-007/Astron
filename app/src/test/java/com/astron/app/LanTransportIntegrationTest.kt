@@ -350,5 +350,211 @@ class LanTransportIntegrationTest {
             assertEquals(1048576L, offset)
         }
     }
+
+    @Test
+    fun testFileResumeDoesNotDuplicateOrCorrupt() {
+        val targetFile = tempFolder.newFile("partial_transfer.dat")
+        val half1 = "First half of the file content. ".toByteArray(Charsets.UTF_8)
+        val half2 = "Second half of the file content!".toByteArray(Charsets.UTF_8)
+        val fullData = half1 + half2
+        val expectedSha = CryptoManager.computeSha256(fullData.inputStream())
+
+        // 1. Initial partial write
+        val session1 = StorageManager.FileWriteSession(targetFile)
+        session1.writeChunk(half1, half1.size)
+        session1.close()
+
+        assertEquals(half1.size.toLong(), targetFile.length())
+
+        // 2. Resume write from offset
+        val session2 = StorageManager.FileWriteSession(targetFile)
+        session2.seekTo(half1.size.toLong())
+        session2.writeChunk(half2, half2.size)
+        session2.close()
+
+        assertEquals(fullData.size.toLong(), targetFile.length())
+        assertEquals(expectedSha, CryptoManager.computeSha256(targetFile.inputStream()))
+        assertArrayEquals(fullData, targetFile.readBytes())
+    }
+
+    @Test
+    fun testLargeChunkExceedingReceiverLocalBufferSizeAccepted() = runBlocking {
+        val serverSocket = ServerSocket(0)
+        val port = serverSocket.localPort
+        val transferredFile = tempFolder.newFile("large_chunk_received.bin")
+
+        // 128KB payload sent in a single chunk (greater than 32KB reliability buffer)
+        val payload = ByteArray(128 * 1024) { (it % 256).toByte() }
+        val sessionKey = CryptoManager.deriveKeyFromToken("large-chunk-test-token")
+
+        val serverJob = async(Dispatchers.IO) {
+            val client = serverSocket.accept()
+            val inStream = DataInputStream(BufferedInputStream(client.getInputStream(), 32 * 1024))
+            val outStream = DataOutputStream(BufferedOutputStream(client.getOutputStream()))
+
+            assertEquals(LanTransport.OP_HANDSHAKE_REQ, inStream.readByte())
+            inStream.readUTF()
+            inStream.readUTF()
+            inStream.readUTF()
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_RESP.toInt())
+            outStream.flush()
+
+            assertEquals(LanTransport.OP_MANIFEST, inStream.readByte())
+            val mLen = inStream.readInt()
+            val mBytes = ByteArray(mLen)
+            inStream.readFully(mBytes)
+            outStream.writeByte(LanTransport.OP_MANIFEST_ACK.toInt())
+            outStream.flush()
+
+            val writeSession = StorageManager.FileWriteSession(transferredFile)
+
+            // Read file start
+            assertEquals(LanTransport.OP_FILE_START, inStream.readByte())
+            inStream.readUTF()
+            inStream.readUTF()
+            inStream.readLong()
+
+            // Read large chunk (128KB)
+            assertEquals(LanTransport.OP_CHUNK, inStream.readByte())
+            val chunkLen = inStream.readInt()
+            assertTrue("Chunk length should be > 32KB", chunkLen > 32 * 1024)
+            assertTrue("Chunk length should be <= MAX_ALLOWED_CHUNK_SIZE", chunkLen <= LanTransport.MAX_ALLOWED_CHUNK_SIZE)
+            val encBuf = ByteArray(chunkLen)
+            inStream.readFully(encBuf)
+            val dec = CryptoManager.decryptAesGcm(encBuf, sessionKey)
+            writeSession.writeChunk(dec, dec.size)
+
+            assertEquals(LanTransport.OP_FILE_END, inStream.readByte())
+            inStream.readUTF()
+
+            assertEquals(LanTransport.OP_TRANSFER_COMPLETE, inStream.readByte())
+            outStream.writeByte(LanTransport.OP_TRANSFER_COMPLETE.toInt())
+            outStream.flush()
+
+            writeSession.close()
+            client.close()
+            serverSocket.close()
+            dec.size
+        }
+
+        val clientJob = async(Dispatchers.IO) {
+            val socket = Socket("127.0.0.1", port)
+            val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
+            val inStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
+
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_REQ.toInt())
+            outStream.writeUTF("s-1")
+            outStream.writeUTF("Sender")
+            outStream.writeUTF("large-chunk-test-token")
+            outStream.flush()
+
+            assertEquals(LanTransport.OP_HANDSHAKE_RESP, inStream.readByte())
+
+            val manifest = TransferManifest(
+                sessionId = "s-1",
+                senderDeviceId = "sender-1",
+                senderDeviceName = "Sender",
+                totalFiles = 1,
+                totalBytes = payload.size.toLong(),
+                items = listOf(
+                    ManifestItem(id = "item-1", name = "large.bin", size = payload.size.toLong(), mimeType = "application/octet-stream")
+                )
+            )
+            val manifestBytes = json.encodeToString(manifest).toByteArray(Charsets.UTF_8)
+            outStream.writeByte(LanTransport.OP_MANIFEST.toInt())
+            outStream.writeInt(manifestBytes.size)
+            outStream.write(manifestBytes)
+            outStream.flush()
+
+            assertEquals(LanTransport.OP_MANIFEST_ACK, inStream.readByte())
+
+            outStream.writeByte(LanTransport.OP_FILE_START.toInt())
+            outStream.writeUTF("item-1")
+            outStream.writeUTF("large.bin")
+            outStream.writeLong(payload.size.toLong())
+            outStream.flush()
+
+            val encPayload = CryptoManager.encryptAesGcm(payload, sessionKey)
+            outStream.writeByte(LanTransport.OP_CHUNK.toInt())
+            outStream.writeInt(encPayload.size)
+            outStream.write(encPayload)
+            outStream.flush()
+
+            outStream.writeByte(LanTransport.OP_FILE_END.toInt())
+            outStream.writeUTF("item-1")
+            outStream.writeByte(LanTransport.OP_TRANSFER_COMPLETE.toInt())
+            outStream.flush()
+
+            assertEquals(LanTransport.OP_TRANSFER_COMPLETE, inStream.readByte())
+            socket.close()
+        }
+
+        withTimeout(5_000) {
+            val bytesReceived = serverJob.await()
+            clientJob.await()
+            assertEquals(payload.size, bytesReceived)
+            assertArrayEquals(payload, transferredFile.readBytes())
+        }
+    }
+
+    @Test
+    fun testConnectionAutoRetrySucceedsOnTransientDelay() = runBlocking {
+        val serverSocket = ServerSocket(0)
+        val port = serverSocket.localPort
+        serverSocket.close() // Initially closed to simulate transient route/port delay
+
+        // Start server with a 300ms delay to simulate transient initial connection drop
+        val serverJob = async(Dispatchers.IO) {
+            kotlinx.coroutines.delay(300)
+            val delayedServer = ServerSocket(port)
+            val client = delayedServer.accept()
+            val inStream = DataInputStream(BufferedInputStream(client.getInputStream()))
+            val outStream = DataOutputStream(BufferedOutputStream(client.getOutputStream()))
+
+            assertEquals(LanTransport.OP_HANDSHAKE_REQ, inStream.readByte())
+            inStream.readUTF()
+            inStream.readUTF()
+            inStream.readUTF()
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_RESP.toInt())
+            outStream.flush()
+
+            client.close()
+            delayedServer.close()
+            true
+        }
+
+        // Sender connects with auto-retry
+        val clientJob = async(Dispatchers.IO) {
+            var socket: Socket? = null
+            for (attempt in 1..3) {
+                try {
+                    socket = Socket().apply {
+                        connect(java.net.InetSocketAddress("127.0.0.1", port), 2000)
+                    }
+                    break
+                } catch (e: Exception) {
+                    kotlinx.coroutines.delay(200L * attempt)
+                }
+            }
+            org.junit.Assert.assertNotNull("Socket should connect after retry", socket)
+            val outStream = DataOutputStream(BufferedOutputStream(socket!!.getOutputStream()))
+            val inStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
+
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_REQ.toInt())
+            outStream.writeUTF("retry-session")
+            outStream.writeUTF("Retry-Device")
+            outStream.writeUTF("retry-token-abc")
+            outStream.flush()
+
+            assertEquals(LanTransport.OP_HANDSHAKE_RESP, inStream.readByte())
+            socket.close()
+            true
+        }
+
+        withTimeout(5_000) {
+            assertTrue(serverJob.await())
+            assertTrue(clientJob.await())
+        }
+    }
 }
 

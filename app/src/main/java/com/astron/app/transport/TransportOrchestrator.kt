@@ -266,6 +266,30 @@ class TransportOrchestrator @Inject constructor(
                     reason = "Low-power BLE background beaconing and proximity discovery"
                 ))
             }
+
+            // ── USB OTG ───────────────────────────────────────────────────────────
+            if (caps.hasUsbDriveAttached) {
+                add(TransportScore(
+                    type = TransportType.USB_OTG,
+                    score = 99,
+                    estimatedSpeedMbps = 300f,
+                    reason = "USB OTG drive connected — maximum physical throughput (zero radio)"
+                ))
+            } else if (caps.hasUsbHost) {
+                add(TransportScore(
+                    type = TransportType.USB_OTG,
+                    score = 0,
+                    estimatedSpeedMbps = 0f,
+                    reason = "USB Host supported — connect USB OTG drive to transfer"
+                ))
+            } else {
+                add(TransportScore(
+                    type = TransportType.USB_OTG,
+                    score = 0,
+                    estimatedSpeedMbps = 0f,
+                    reason = "USB OTG not supported by hardware"
+                ))
+            }
         }
 
         val ranked = scores.sortedByDescending { it.score }

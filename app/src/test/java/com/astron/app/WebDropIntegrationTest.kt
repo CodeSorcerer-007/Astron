@@ -166,7 +166,20 @@ class WebDropIntegrationTest {
                     assertTrue("Status must be 413 Payload Too Large: $statusLine", statusLine?.contains("413 Payload Too Large") == true)
                 }
 
-                // 5. Test 404 for unknown path (with valid token)
+                // 6. Test POST /api/upload with X-Encrypted exceeding 50 MB safe bound (Rejection with 413)
+                Socket("127.0.0.1", testPort).use { socket ->
+                    val out = OutputStreamWriter(socket.getOutputStream())
+                    val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+
+                    val excessiveEncryptedLength = 55L * 1024 * 1024 // 55 MB
+                    out.write("POST /api/upload?token=$token HTTP/1.1\r\nHost: 127.0.0.1:$testPort\r\nContent-Length: $excessiveEncryptedLength\r\nX-Encrypted: aes-256-gcm\r\nX-Filename: large_enc.bin\r\n\r\n")
+                    out.flush()
+
+                    val statusLine = reader.readLine()
+                    assertTrue("Status must be 413 Payload Too Large for oversized encrypted payload: $statusLine", statusLine?.contains("413 Payload Too Large") == true)
+                }
+
+                // 7. Test 404 for unknown path (with valid token)
                 Socket("127.0.0.1", testPort).use { socket ->
                     val out = OutputStreamWriter(socket.getOutputStream())
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream()))

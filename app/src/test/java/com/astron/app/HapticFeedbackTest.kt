@@ -22,5 +22,6 @@ class HapticFeedbackTest {
         manager.heavyClick()
         manager.success()
         manager.error()
+        manager.milestone()
     }
 }

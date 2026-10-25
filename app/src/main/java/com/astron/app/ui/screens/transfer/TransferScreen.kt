@@ -45,7 +45,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +65,7 @@ import com.astron.app.core.model.SessionState
 import com.astron.app.core.util.HapticFeedbackManager
 import com.astron.app.core.util.NetworkUtils
 import com.astron.app.ui.components.CosmicStarfield
+import com.astron.app.ui.components.HolographicOrbitalSpeedometer
 import com.astron.app.ui.theme.BorderLight
 import com.astron.app.ui.theme.CanvasLight
 import com.astron.app.ui.theme.CosmicCyan
@@ -104,6 +107,22 @@ fun TransferScreen(
     val isFailed = state == SessionState.FAILED
     val isCancelled = state == SessionState.CANCELLED
     val isTerminal = isCompleted || isFailed || isCancelled
+
+    var lastMilestoneCrossed by remember { androidx.compose.runtime.mutableStateOf(0) }
+    LaunchedEffect(progress) {
+        val currentMilestone = when {
+            progress >= 0.75f -> 3
+            progress >= 0.50f -> 2
+            progress >= 0.25f -> 1
+            else -> 0
+        }
+        if (currentMilestone > lastMilestoneCrossed && !isTerminal) {
+            lastMilestoneCrossed = currentMilestone
+            if (hapticsEnabled) {
+                hapticEngine.milestone()
+            }
+        }
+    }
 
     LaunchedEffect(isCompleted) {
         if (isCompleted && hapticsEnabled) {
@@ -232,164 +251,21 @@ fun TransferScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Large Holographic Transfer Progress Display
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.size(240.dp)
-        ) {
-            if (isCompleted) {
-                val celebrationTransition = rememberInfiniteTransition(label = "celebrationRipples")
-                val rippleScale by celebrationTransition.animateFloat(
-                    initialValue = 1f,
-                    targetValue = 1.25f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1600, easing = LinearOutSlowInEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "rippleScale"
-                )
-                val rippleAlpha by celebrationTransition.animateFloat(
-                    initialValue = 0.5f,
-                    targetValue = 0f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1600, easing = LinearOutSlowInEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "rippleAlpha"
-                )
-                val rippleScale2 by celebrationTransition.animateFloat(
-                    initialValue = 1f,
-                    targetValue = 1.15f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1600, delayMillis = 400, easing = LinearOutSlowInEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "rippleScale2"
-                )
-                val rippleAlpha2 by celebrationTransition.animateFloat(
-                    initialValue = 0.35f,
-                    targetValue = 0f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1600, delayMillis = 400, easing = LinearOutSlowInEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "rippleAlpha2"
-                )
+        // Large Holographic Planetary Orbital Speedometer Centerpiece
+        HolographicOrbitalSpeedometer(
+            progress = progress,
+            state = state,
+            transferredBytes = transferredBytes,
+            totalBytes = totalBytes,
+            speedBytesPerSec = speed,
+            etaSeconds = eta,
+            isPaused = isPaused,
+            errorMessage = currentSession?.errorMessage
+        )
 
-                Box(
-                    modifier = Modifier
-                        .size(190.dp * rippleScale)
-                        .clip(CircleShape)
-                        .border(2.dp, EmeraldVerified.copy(alpha = rippleAlpha), CircleShape)
-                )
-                Box(
-                    modifier = Modifier
-                        .size(190.dp * rippleScale2)
-                        .clip(CircleShape)
-                        .border(1.5.dp, EmeraldVerified.copy(alpha = rippleAlpha2), CircleShape)
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(190.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceLight)
-                    .border(
-                        2.dp,
-                        when {
-                            isCompleted -> EmeraldVerified
-                            isFailed -> CrimsonError
-                            isCancelled -> RadiantAmber
-                            else -> BorderLight
-                        },
-                        CircleShape
-                    )
-            )
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            ) {
-                when {
-                    isCompleted -> {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Completed",
-                            tint = EmeraldVerified,
-                            modifier = Modifier.size(54.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "100%",
-                            color = TextPrimary,
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
-                    isFailed -> {
-                        Icon(
-                            imageVector = Icons.Default.WarningAmber,
-                            contentDescription = "Transfer Failed",
-                            tint = CrimsonError,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Transfer Failed",
-                            color = CrimsonError,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        val errorDetail = currentSession?.errorMessage
-                        if (!errorDetail.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = errorDetail,
-                                color = TextSecondary,
-                                fontSize = 11.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    isCancelled -> {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Transfer Cancelled",
-                            tint = RadiantAmber,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Cancelled",
-                            color = RadiantAmber,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    else -> {
-                        Text(
-                            text = "${(progress * 100).toInt()}%",
-                            color = TextPrimary,
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = (-1).sp
-                        )
-                        Text(
-                            text = "${NetworkUtils.formatBytes(transferredBytes)} / ${NetworkUtils.formatBytes(totalBytes)}",
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Speed & ETA Telemetry
         AnimatedVisibility(visible = !isTerminal) {

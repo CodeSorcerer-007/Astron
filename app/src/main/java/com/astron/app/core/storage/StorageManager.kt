@@ -152,21 +152,42 @@ class StorageManager(private val context: Context) {
      */
     fun openInputStreamAtOffset(uri: Uri, startOffset: Long): InputStream {
         val stream = try {
-            if (uri.scheme == "file") {
-                File(uri.path ?: "").inputStream()
-            } else {
-                contentResolver?.openInputStream(uri)
+            when {
+                uri.scheme == "file" -> File(uri.path ?: "").inputStream()
+                uri.scheme == "content" -> contentResolver?.openInputStream(uri)
+                uri.path != null && File(uri.path!!).exists() -> File(uri.path!!).inputStream()
+                File(uri.toString()).exists() -> File(uri.toString()).inputStream()
+                else -> contentResolver?.openInputStream(uri)
             }
         } catch (e: Throwable) {
-            null
+            try {
+                val path = uri.path ?: uri.toString()
+                val f = File(path)
+                if (f.exists()) f.inputStream() else null
+            } catch (_: Throwable) {
+                null
+            }
         } ?: throw IllegalStateException("Cannot open input stream for $uri")
 
         if (startOffset > 0) {
             var skipped = 0L
+            val scratch = ByteArray(8192)
             while (skipped < startOffset) {
-                val n = stream.skip(startOffset - skipped)
-                if (n <= 0) break
-                skipped += n
+                val toSkip = startOffset - skipped
+                val n = stream.skip(toSkip)
+                if (n > 0) {
+                    skipped += n
+                } else {
+                    // Fallback to read when stream.skip returns 0
+                    val bytesToRead = minOf(scratch.size.toLong(), toSkip).toInt()
+                    val bytesRead = stream.read(scratch, 0, bytesToRead)
+                    if (bytesRead == -1) break
+                    skipped += bytesRead
+                }
+            }
+            if (skipped < startOffset) {
+                try { stream.close() } catch (_: Exception) {}
+                throw java.io.EOFException("Cannot skip to requested offset: requested $startOffset, only reached $skipped")
             }
         }
         return stream
@@ -179,7 +200,8 @@ class StorageManager(private val context: Context) {
     suspend fun prepareDestinationFile(
         rawName: String,
         relativePath: String,
-        duplicateAction: DuplicateAction
+        duplicateAction: DuplicateAction,
+        isResume: Boolean = false
     ): File = withContext(Dispatchers.IO) {
         val baseDir = getAstronDownloadDirectory()
         val sanitizedName = CryptoManager.sanitizeFilename(rawName)
@@ -194,6 +216,10 @@ class StorageManager(private val context: Context) {
         var candidate = File(targetDir, sanitizedName)
 
         if (candidate.exists()) {
+            if (isResume) {
+                // When resuming an interrupted file transfer, target the existing partial file directly
+                return@withContext candidate
+            }
             when (duplicateAction) {
                 DuplicateAction.REPLACE -> {
                     // Ready to overwrite

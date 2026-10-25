@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Environment
 import android.os.PowerManager
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,8 @@ data class DeviceCapabilities(
     val isBatterySaverOn: Boolean = false,
     val isBluetoothEnabled: Boolean = false,
     val isWifiEnabled: Boolean = false,
+    val hasUsbHost: Boolean = false,
+    val hasUsbDriveAttached: Boolean = false,
     val networkType: NetworkType = NetworkType.NONE
 )
 
@@ -75,11 +78,20 @@ object CapabilityDetector {
             isBatterySaverOn = isBatterySaverActive(context),
             isBluetoothEnabled = isBluetoothEnabled(context),
             isWifiEnabled = isWifiEnabled(context),
+            hasUsbHost = hasFeature(context, PackageManager.FEATURE_USB_HOST),
+            hasUsbDriveAttached = isUsbDriveAttached(context),
             networkType = detectNetworkType(context)
         )
         _capabilities.value = caps
         Log.d(TAG, "Capabilities refreshed: $caps")
         return caps
+    }
+
+    private fun isUsbDriveAttached(context: Context): Boolean = try {
+        val dirs = context.getExternalFilesDirs(null)
+        dirs.any { it != null && Environment.isExternalStorageRemovable(it) }
+    } catch (_: Throwable) {
+        false
     }
 
     private fun hasFeature(context: Context, feature: String): Boolean = try {
