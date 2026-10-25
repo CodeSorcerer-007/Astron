@@ -1,0 +1,5 @@
+AirDrop and Quick Share walked so Astron could bend space-time at 250 MB/s across 12 transports. 🪐⚡
+
+12 transports. Wi-Fi 7 MLO channel bonding. Zero-router SoftAP & Wi-Fi Direct. Mathematical XOR Forward Error Correction. AES-256-GCM + SubtleCrypto E2EE. Room SQLite crash-safe byte-level resume. Zero tracking. 100% Free & Open Source.
+
+Check out Astron: https://github.com/CodeSorcerer-007/Astron
