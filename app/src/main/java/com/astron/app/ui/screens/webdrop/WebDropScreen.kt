@@ -75,6 +75,7 @@ fun WebDropScreen(
     val context = LocalContext.current
     val deviceName by viewModel.deviceName.collectAsState()
     val serverUrl by viewModel.serverUrl.collectAsState()
+    val sessionPin by viewModel.sessionPin.collectAsState()
     val qrBitmap by viewModel.qrBitmap.collectAsState()
     val receivedFiles by viewModel.uploadedFiles.collectAsState()
 
@@ -226,6 +227,31 @@ fun WebDropScreen(
                     tint = CosmicCyan,
                     modifier = Modifier.size(16.dp)
                 )
+            }
+
+            if (sessionPin.isNotBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceSubtle)
+                        .border(1.dp, BorderLight, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Session PIN: ",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = sessionPin,
+                        color = CosmicCyan,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))

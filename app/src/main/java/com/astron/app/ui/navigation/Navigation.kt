@@ -150,7 +150,10 @@ fun MainNavigation(
                     pendingSendItems = items
                     navigateTo(Screen.WEBDROP)
                 },
-                onNavigateToLightDrop = { navigateTo(Screen.LIGHTDROP) },
+                onNavigateToLightDrop = { items ->
+                    pendingSendItems = items
+                    navigateTo(Screen.LIGHTDROP)
+                },
                 onNavigateToFileBrowser = { navigateTo(Screen.FILE_BROWSER) },
                 initialUris = initialUris,
                 initialItems = pendingSendItems,
@@ -168,7 +171,8 @@ fun MainNavigation(
                 sharedFiles = pendingSendItems
             )
             Screen.LIGHTDROP -> LightDropScreen(
-                onNavigateBack = { navigateBack() }
+                onNavigateBack = { navigateBack() },
+                sharedFiles = pendingSendItems
             )
             Screen.HISTORY -> HistoryScreen(
                 onNavigateBack = { navigateBack() }

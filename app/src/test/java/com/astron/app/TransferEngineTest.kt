@@ -85,4 +85,41 @@ class TransferEngineTest {
         engine.dismissSession()
         assertNull(engine.currentSession.value)
     }
+
+    @Test
+    fun testCancelTransferPreservesCompletedAndFailedState() {
+        val engine = TransferEngine(dummyContext, storageManager, preferencesRepository, historyRepository)
+
+        val field = TransferEngine::class.java.getDeclaredField("_currentSession")
+        field.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val sessionFlow = field.get(engine) as kotlinx.coroutines.flow.MutableStateFlow<TransferSession?>
+
+        // When COMPLETED, cancelTransfer should not overwrite with CANCELLED
+        sessionFlow.value = TransferSession(
+            sessionId = "s1",
+            direction = TransferDirection.SEND,
+            state = SessionState.COMPLETED
+        )
+        engine.cancelTransfer()
+        assertEquals(SessionState.COMPLETED, engine.currentSession.value?.state)
+
+        // When FAILED, cancelTransfer should not overwrite with CANCELLED
+        sessionFlow.value = TransferSession(
+            sessionId = "s2",
+            direction = TransferDirection.SEND,
+            state = SessionState.FAILED
+        )
+        engine.cancelTransfer()
+        assertEquals(SessionState.FAILED, engine.currentSession.value?.state)
+
+        // When TRANSFERRING, cancelTransfer should cancel
+        sessionFlow.value = TransferSession(
+            sessionId = "s3",
+            direction = TransferDirection.SEND,
+            state = SessionState.TRANSFERRING
+        )
+        engine.cancelTransfer()
+        assertEquals(SessionState.CANCELLED, engine.currentSession.value?.state)
+    }
 }

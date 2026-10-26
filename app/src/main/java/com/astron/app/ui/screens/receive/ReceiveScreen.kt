@@ -1,6 +1,7 @@
 package com.astron.app.ui.screens.receive
 
 import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -112,10 +113,18 @@ fun ReceiveScreen(
         }
     }
 
+    BackHandler {
+        viewModel.stopReceiver(force = true)
+        onNavigateBack()
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             activity?.let { NfcManager.clearNdefPush(it) }
-            viewModel.stopReceiver()
+            val state = viewModel.session.value?.state
+            if (state != SessionState.TRANSFERRING && state != SessionState.VERIFYING && state != SessionState.COMPLETED) {
+                viewModel.stopReceiver(force = false)
+            }
         }
     }
 
@@ -157,7 +166,10 @@ fun ReceiveScreen(
                 TopAppBar(
                     title = { Text("Receive Files", color = TextPrimary, fontWeight = FontWeight.Bold) },
                     navigationIcon = {
-                        IconButton(onClick = onNavigateBack) {
+                        IconButton(onClick = {
+                            viewModel.stopReceiver(force = true)
+                            onNavigateBack()
+                        }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",

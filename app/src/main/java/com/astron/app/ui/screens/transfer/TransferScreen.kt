@@ -1,5 +1,6 @@
 package com.astron.app.ui.screens.transfer
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -107,6 +108,13 @@ fun TransferScreen(
     val isFailed = state == SessionState.FAILED
     val isCancelled = state == SessionState.CANCELLED
     val isTerminal = isCompleted || isFailed || isCancelled
+
+    BackHandler {
+        if (isTerminal) {
+            viewModel.dismissSession()
+        }
+        onDismiss()
+    }
 
     var lastMilestoneCrossed by remember { androidx.compose.runtime.mutableStateOf(0) }
     LaunchedEffect(progress) {

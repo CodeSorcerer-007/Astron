@@ -46,11 +46,39 @@ object NetworkUtils {
     }
 
     /**
+     * Resolves the active Wi-Fi, hotspot, or local network interface for multicast and socket binding.
+     */
+    fun getActiveWifiNetworkInterface(): NetworkInterface? {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
+            val list = interfaces.toList()
+            for (intf in list) {
+                if (intf.isLoopback || !intf.isUp) continue
+                val name = intf.name.lowercase(Locale.ROOT)
+                val isPreferred = name.contains("wlan") || name.contains("ap") || name.contains("eth") || name.contains("swlan")
+                if (isPreferred && intf.inetAddresses.toList().any { !it.isLoopbackAddress && it is Inet4Address }) {
+                    return intf
+                }
+            }
+            for (intf in list) {
+                if (intf.isLoopback || !intf.isUp) continue
+                if (intf.inetAddresses.toList().any { !it.isLoopbackAddress && it is Inet4Address }) {
+                    return intf
+                }
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
+    /**
      * Resolves human-friendly default device name (e.g. "Pixel 8 Pro", "Galaxy S24").
      */
     fun getDefaultDeviceName(): String {
-        val manufacturer = Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-        val model = Build.MODEL
+        val rawMan = try { Build.MANUFACTURER } catch (_: Throwable) { null }
+        val rawModel = try { Build.MODEL } catch (_: Throwable) { null }
+        val manufacturer = (rawMan?.takeIf { it.isNotBlank() } ?: "Android")
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        val model = rawModel?.takeIf { it.isNotBlank() } ?: "Device"
         return if (model.startsWith(manufacturer, ignoreCase = true)) {
             model
         } else {

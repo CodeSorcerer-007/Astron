@@ -47,22 +47,28 @@ class WebDropViewModel @Inject constructor(
     private val _qrBitmap = MutableStateFlow<Bitmap?>(QrCodeGenerator.generateQrBitmap("http://$initialIp:8080", size = 320))
     val qrBitmap: StateFlow<Bitmap?> = _qrBitmap.asStateFlow()
 
+    private val _sessionPin = MutableStateFlow("")
+    val sessionPin: StateFlow<String> = _sessionPin.asStateFlow()
+
     fun startServer(filesToShare: List<TransferItem>) {
         viewModelScope.launch {
             val name = preferencesRepository.deviceNameFlow.first()
             transferEngine.webDropServer.startServer(
                 deviceName = name,
                 filesToShare = filesToShare,
+                onServerReady = {
+                    val url = transferEngine.webDropServer.webDropUrl
+                        ?: "http://${NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"}:${transferEngine.webDropServer.actualPort}?token=${transferEngine.webDropServer.currentSessionToken}"
+                    val pin = transferEngine.webDropServer.currentSessionToken
+                    _serverUrl.value = url
+                    _sessionPin.value = pin
+                    _qrBitmap.value = QrCodeGenerator.generateQrBitmap(url, size = 320)
+                    AstronNotificationHelper.showWebDropNotification(context, url)
+                },
                 onFileUploaded = { file ->
                     _uploadedFiles.update { current -> listOf(file) + current }
                 }
             )
-
-            val url = transferEngine.webDropServer.displayUrl
-                ?: "http://${NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"}:8080"
-            _serverUrl.value = url
-            _qrBitmap.value = QrCodeGenerator.generateQrBitmap(url, size = 320)
-            AstronNotificationHelper.showWebDropNotification(context, url)
         }
     }
 

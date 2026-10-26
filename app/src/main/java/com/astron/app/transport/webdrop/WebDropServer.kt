@@ -195,7 +195,15 @@ class WebDropServer(
                     rawPath.substringAfter("token=").substringBefore('&')
                 } else ""
                 val headerToken = headers["x-session-token"] ?: ""
-                val providedToken = if (queryToken.isNotBlank()) queryToken else headerToken
+                val cookieToken = headers["cookie"]?.split(';')
+                    ?.find { it.trim().startsWith("astron_token=") }
+                    ?.substringAfter('=')?.trim() ?: ""
+                val providedToken = when {
+                    queryToken.isNotBlank() -> queryToken
+                    headerToken.isNotBlank() -> headerToken
+                    cookieToken.isNotBlank() -> cookieToken
+                    else -> ""
+                }
                 if (providedToken != sessionToken) {
                     send403(outStream, "Invalid or missing session token")
                     return
@@ -245,7 +253,7 @@ class WebDropServer(
                     try { URLDecoder.decode(rawFileName, "UTF-8") } catch (_: Exception) { rawFileName }
                 )
 
-                val targetFile = File(storageManager.getAstronDownloadDirectory(), fileName)
+                val targetFile = storageManager.createDestinationFile(fileName)
                 targetFile.parentFile?.mkdirs()
 
                 if (isEncrypted) {
@@ -459,6 +467,10 @@ class WebDropServer(
 
                 // 2. Client-Side Web Cryptography / SubtleCrypto Helper
                 const sessionToken = '$sessionToken';
+                try {
+                    document.cookie = "astron_token=" + encodeURIComponent(sessionToken) + "; path=/; max-age=86400";
+                    sessionStorage.setItem('astron_token', sessionToken);
+                } catch (_) {}
                 async function deriveAesKey(token) {
                     const enc = new TextEncoder();
                     const keyMaterial = await window.crypto.subtle.importKey(
@@ -653,13 +665,57 @@ class WebDropServer(
     }
 
     private fun send403(out: OutputStream, message: String) {
-        val body = "403 Forbidden: $message"
+        val safeDevice = htmlEscape(deviceName)
+        val htmlBody = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Astron Web Drop — PIN Required</title>
+                <link rel="icon" type="image/png" href="/logo.png">
+                <style>
+                    :root { --bg: #070A12; --card: #0E1424; --cyan: #00E5FF; --text: #F1F5F9; --muted: #94A3B8; --border: rgba(0,229,255,0.25); }
+                    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+                    body { background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+                    .card { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 32px 24px; max-width: 420px; width: 100%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+                    .logo { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 14px; background: rgba(0,229,255,0.1); display: flex; align-items: center; justify-content: center; }
+                    h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+                    p { font-size: 13px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; }
+                    input { width: 100%; padding: 14px 16px; border-radius: 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text); font-size: 16px; font-weight: 600; text-align: center; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; outline: none; }
+                    input:focus { border-color: var(--cyan); }
+                    button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: linear-gradient(135deg, #00E5FF 0%, #3B82F6 100%); color: #070A12; font-weight: 700; font-size: 15px; cursor: pointer; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <div class="logo">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00E5FF" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    </div>
+                    <h2>Session PIN Required</h2>
+                    <p>Enter the 8-character PIN displayed on <strong>$safeDevice</strong> to connect to Web Drop.</p>
+                    <input id="pinInput" maxlength="16" placeholder="Enter Session PIN" autofocus autocomplete="off" onkeydown="if(event.key==='Enter') unlock();">
+                    <button onclick="unlock()">Connect to Web Drop</button>
+                    <script>
+                        function unlock() {
+                            const pin = document.getElementById('pinInput').value.trim();
+                            if (!pin) return;
+                            document.cookie = "astron_token=" + encodeURIComponent(pin) + "; path=/; max-age=86400";
+                            window.location.href = "/?token=" + encodeURIComponent(pin);
+                        }
+                    </script>
+                </div>
+            </body>
+            </html>
+        """.trimIndent()
+        val bytes = htmlBody.toByteArray(Charsets.UTF_8)
         val header = "HTTP/1.1 403 Forbidden\r\n" +
                 corsHeaders() +
-                "Content-Type: text/plain; charset=UTF-8\r\n" +
-                "Content-Length: ${body.length}\r\n" +
+                "Content-Type: text/html; charset=UTF-8\r\n" +
+                "Content-Length: ${bytes.size}\r\n" +
                 "Connection: close\r\n\r\n"
-        out.write((header + body).toByteArray(Charsets.UTF_8))
+        out.write(header.toByteArray(Charsets.UTF_8))
+        out.write(bytes)
         out.flush()
     }
 

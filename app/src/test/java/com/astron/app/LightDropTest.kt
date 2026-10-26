@@ -155,4 +155,24 @@ class LightDropTest {
         assertNull(lightDropManager.parseFrame("ASTL:2:1:0:1:100:AQ==")) // wrong version (2 != 1)
         assertNull(lightDropManager.parseFrame("ASTL:1:not_a_number:0:1:100:AQ=="))
     }
+
+    @Test
+    fun testEncodeFileWithFileNameMetadataPreserved() {
+        val testFile = tempFolder.newFile("document_confidential.pdf")
+        val content = "Confidential Report 2026 Content".toByteArray(Charsets.UTF_8)
+        testFile.writeBytes(content)
+
+        val frames = lightDropManager.encodeFileToFrames(testFile, sessionId = 808)
+        assertTrue(frames.isNotEmpty())
+        assertEquals("document_confidential.pdf", frames.first().fileName)
+
+        val serialized = lightDropManager.serializeFrame(frames.first())
+        val parsed = lightDropManager.parseFrame(serialized)
+        assertNotNull(parsed)
+        assertEquals("document_confidential.pdf", parsed?.fileName)
+
+        val session = LightDropManager.ReceiverSession(808, frames.size)
+        session.addFrame(parsed!!)
+        assertEquals("document_confidential.pdf", session.detectedFileName)
+    }
 }

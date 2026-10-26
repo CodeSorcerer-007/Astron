@@ -137,9 +137,13 @@ class MulticastGroupManager @Inject constructor(
         var socket: MulticastSocket? = null
 
         try {
+            val wifiIf = com.astron.app.core.util.NetworkUtils.getActiveWifiNetworkInterface()
             socket = MulticastSocket().apply {
                 timeToLive = 2
                 sendBufferSize = 256 * 1024
+                if (wifiIf != null) {
+                    try { networkInterface = wifiIf } catch (_: Throwable) {}
+                }
             }
             activeSocket = socket
             _status.value = MulticastGroupStatus(
@@ -285,26 +289,40 @@ class MulticastGroupManager @Inject constructor(
     suspend fun startGroupReceiver(
         onManifestReceived: (TransferManifest) -> Unit,
         onProgress: (transferred: Long, total: Long, activeFileName: String) -> Unit,
-        onFileFinished: (fileId: String, completedFile: File) -> Unit
+        onFileFinished: (fileId: String, completedFile: File) -> Unit,
+        onComplete: (Boolean) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
         acquireMulticastLock()
         isCancelledFlag = false
         val groupAddress = InetAddress.getByName(MULTICAST_IP)
+        val groupSocketAddress = java.net.InetSocketAddress(groupAddress, MULTICAST_PORT)
+        val wifiIf = com.astron.app.core.util.NetworkUtils.getActiveWifiNetworkInterface()
         var socket: MulticastSocket? = null
 
         try {
             socket = MulticastSocket(MULTICAST_PORT).apply {
                 reuseAddress = true
-                receiveBufferSize = 256 * 1024
-                joinGroup(groupAddress)
+                receiveBufferSize = 512 * 1024
+                try {
+                    if (wifiIf != null) {
+                        joinGroup(groupSocketAddress, wifiIf)
+                    } else {
+                        joinGroup(groupAddress)
+                    }
+                } catch (e: Exception) {
+                    joinGroup(groupAddress)
+                }
             }
             activeSocket = socket
             _status.value = MulticastGroupStatus(isRunning = true, isSender = false)
 
-            val buffer = ByteArray(2048)
+            val buffer = ByteArray(65535)
             var activeManifest: TransferManifest? = null
             val fileWriters = ConcurrentHashMap<String, RandomAccessFile>()
             val writtenBytesPerFile = ConcurrentHashMap<String, Long>()
+            val receivedChunksPerFile = ConcurrentHashMap<String, MutableSet<Int>>()
+            val fileBlockChunks = ConcurrentHashMap<String, ConcurrentHashMap<Int, ConcurrentHashMap<Int, ByteArray>>>()
+            val fileBlockParity = ConcurrentHashMap<String, ConcurrentHashMap<Int, ByteArray>>()
             var totalReceived = 0L
 
             while (isActive && !isCancelledFlag) {
@@ -322,64 +340,174 @@ class MulticastGroupManager @Inject constructor(
                 when (op) {
                     OP_ANNOUNCE -> {
                         val manifestLen = byteBuffer.int
-                        val manifestBytes = ByteArray(manifestLen)
-                        byteBuffer.get(manifestBytes)
-                        try {
-                            val manifest = json.decodeFromString<TransferManifest>(String(manifestBytes, Charsets.UTF_8))
-                            activeManifest = manifest
-                            onManifestReceived(manifest)
-                            _status.value = _status.value.copy(totalBytes = manifest.totalBytes)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Error decoding group manifest", e)
+                        if (manifestLen <= byteBuffer.remaining()) {
+                            val manifestBytes = ByteArray(manifestLen)
+                            byteBuffer.get(manifestBytes)
+                            try {
+                                val manifest = json.decodeFromString<TransferManifest>(String(manifestBytes, Charsets.UTF_8))
+                                activeManifest = manifest
+                                onManifestReceived(manifest)
+                                _status.value = _status.value.copy(totalBytes = manifest.totalBytes)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error decoding group manifest", e)
+                            }
                         }
                     }
 
                     OP_CHUNK -> {
                         val nameLen = byteBuffer.short.toInt() and 0xFFFF
-                        val nameBytes = ByteArray(nameLen)
-                        byteBuffer.get(nameBytes)
-                        val fileId = String(nameBytes, Charsets.UTF_8)
-                        val chunkIndex = byteBuffer.int
-                        val payloadLen = byteBuffer.int
-                        val crc = byteBuffer.long
-                        val payload = ByteArray(payloadLen)
-                        byteBuffer.get(payload)
+                        if (byteBuffer.remaining() >= nameLen + 4 + 4 + 8) {
+                            val nameBytes = ByteArray(nameLen)
+                            byteBuffer.get(nameBytes)
+                            val fileId = String(nameBytes, Charsets.UTF_8)
+                            val chunkIndex = byteBuffer.int
+                            val payloadLen = byteBuffer.int
+                            val crc = byteBuffer.long
+                            if (payloadLen <= byteBuffer.remaining()) {
+                                val payload = ByteArray(payloadLen)
+                                byteBuffer.get(payload)
 
-                        // Verify integrity
-                        if (computeCrc32(payload) == crc) {
-                            val manifestItem = activeManifest?.items?.find { it.id == fileId }
-                            val fileName = manifestItem?.name ?: "multicast_file_$fileId"
+                                // Verify integrity
+                                if (computeCrc32(payload) == crc) {
+                                    val receivedSet = receivedChunksPerFile.getOrPut(fileId) { ConcurrentHashMap.newKeySet() }
+                                    if (receivedSet.add(chunkIndex)) {
+                                        val manifestItem = activeManifest?.items?.find { it.id == fileId }
+                                        val fileName = manifestItem?.name ?: "multicast_file_$fileId"
 
-                            val writer = fileWriters.getOrPut(fileId) {
-                                val dest = File(storageManager.downloadDirectory, fileName)
-                                RandomAccessFile(dest, "rw")
+                                        val writer = fileWriters.getOrPut(fileId) {
+                                            val dest = File(storageManager.downloadDirectory, fileName)
+                                            RandomAccessFile(dest, "rw")
+                                        }
+
+                                        val offset = chunkIndex.toLong() * CHUNK_DATA_SIZE
+                                        writer.seek(offset)
+                                        writer.write(payload)
+
+                                        // Store for FEC parity recovery
+                                        val blockIdx = chunkIndex / FEC_BLOCK_SIZE
+                                        val blocks = fileBlockChunks.getOrPut(fileId) { ConcurrentHashMap() }
+                                        val block = blocks.getOrPut(blockIdx) { ConcurrentHashMap() }
+                                        block[chunkIndex] = payload
+
+                                        val prev = writtenBytesPerFile[fileId] ?: 0L
+                                        val updated = prev + payloadLen
+                                        writtenBytesPerFile[fileId] = updated
+
+                                        totalReceived += payloadLen
+                                        _status.value = _status.value.copy(
+                                            totalTransferredBytes = totalReceived,
+                                            currentFileName = fileName
+                                        )
+                                        onProgress(totalReceived, activeManifest?.totalBytes ?: totalReceived, fileName)
+
+                                        if (manifestItem != null && updated >= manifestItem.size) {
+                                            try { writer.close() } catch (_: Exception) {}
+                                            fileWriters.remove(fileId)
+                                            val finishedFile = File(storageManager.downloadDirectory, fileName)
+                                            onFileFinished(fileId, finishedFile)
+                                        }
+                                    }
+                                }
                             }
+                        }
+                    }
 
-                            val offset = chunkIndex.toLong() * CHUNK_DATA_SIZE
-                            writer.seek(offset)
-                            writer.write(payload)
+                    OP_PARITY -> {
+                        val nameLen = byteBuffer.short.toInt() and 0xFFFF
+                        if (byteBuffer.remaining() >= nameLen + 4 + 4 + 8) {
+                            val nameBytes = ByteArray(nameLen)
+                            byteBuffer.get(nameBytes)
+                            val fileId = String(nameBytes, Charsets.UTF_8)
+                            val blockIndex = byteBuffer.int
+                            val parityLen = byteBuffer.int
+                            val crc = byteBuffer.long
+                            if (parityLen <= byteBuffer.remaining()) {
+                                val parityPayload = ByteArray(parityLen)
+                                byteBuffer.get(parityPayload)
 
-                            val prev = writtenBytesPerFile[fileId] ?: 0L
-                            val updated = prev + payloadLen
-                            writtenBytesPerFile[fileId] = updated
+                                if (computeCrc32(parityPayload) == crc) {
+                                    val parities = fileBlockParity.getOrPut(fileId) { ConcurrentHashMap() }
+                                    parities[blockIndex] = parityPayload
 
-                            totalReceived += payloadLen
-                            _status.value = _status.value.copy(
-                                totalTransferredBytes = totalReceived,
-                                currentFileName = fileName
-                            )
-                            onProgress(totalReceived, activeManifest?.totalBytes ?: totalReceived, fileName)
+                                    val manifestItem = activeManifest?.items?.find { it.id == fileId }
+                                    if (manifestItem != null) {
+                                        val totalFileChunks = ((manifestItem.size + CHUNK_DATA_SIZE - 1) / CHUNK_DATA_SIZE).toInt()
+                                        val startChunk = blockIndex * FEC_BLOCK_SIZE
+                                        val endChunk = minOf(startChunk + FEC_BLOCK_SIZE, totalFileChunks)
+                                        val expectedInBlock = endChunk - startChunk
 
-                            if (manifestItem != null && updated >= manifestItem.size) {
-                                writer.close()
-                                fileWriters.remove(fileId)
-                                val finishedFile = File(storageManager.downloadDirectory, fileName)
-                                onFileFinished(fileId, finishedFile)
+                                        val receivedSet = receivedChunksPerFile.getOrPut(fileId) { ConcurrentHashMap.newKeySet() }
+                                        val missingInBlock = (startChunk until endChunk).filter { !receivedSet.contains(it) }
+
+                                        // Forward Error Correction: If exactly 1 chunk was dropped, recover it instantly!
+                                        if (missingInBlock.size == 1) {
+                                            val missingChunkIndex = missingInBlock.first()
+                                            val blocks = fileBlockChunks.getOrPut(fileId) { ConcurrentHashMap() }
+                                            val block = blocks.getOrPut(blockIndex) { ConcurrentHashMap() }
+                                            val availableChunks = block.values.toList()
+
+                                            if (availableChunks.size == expectedInBlock - 1) {
+                                                val recovered = recoverMissingChunk(availableChunks, parityPayload)
+                                                val expectedSize = if (missingChunkIndex == totalFileChunks - 1) {
+                                                    val rem = (manifestItem.size % CHUNK_DATA_SIZE).toInt()
+                                                    if (rem == 0) CHUNK_DATA_SIZE else rem
+                                                } else {
+                                                    CHUNK_DATA_SIZE
+                                                }
+                                                val validRecovered = if (recovered.size > expectedSize) recovered.copyOf(expectedSize) else recovered
+
+                                                if (receivedSet.add(missingChunkIndex)) {
+                                                    val writer = fileWriters.getOrPut(fileId) {
+                                                        val dest = File(storageManager.downloadDirectory, manifestItem.name)
+                                                        RandomAccessFile(dest, "rw")
+                                                    }
+                                                    val offset = missingChunkIndex.toLong() * CHUNK_DATA_SIZE
+                                                    writer.seek(offset)
+                                                    writer.write(validRecovered)
+
+                                                    val prev = writtenBytesPerFile[fileId] ?: 0L
+                                                    val updated = prev + validRecovered.size
+                                                    writtenBytesPerFile[fileId] = updated
+
+                                                    totalReceived += validRecovered.size
+                                                    _status.value = _status.value.copy(
+                                                        totalTransferredBytes = totalReceived,
+                                                        currentFileName = manifestItem.name
+                                                    )
+                                                    onProgress(totalReceived, activeManifest.totalBytes, manifestItem.name)
+
+                                                    if (updated >= manifestItem.size) {
+                                                        try { writer.close() } catch (_: Exception) {}
+                                                        fileWriters.remove(fileId)
+                                                        val finishedFile = File(storageManager.downloadDirectory, manifestItem.name)
+                                                        onFileFinished(fileId, finishedFile)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
 
                     OP_COMPLETE -> {
+                        for ((fileId, writer) in fileWriters) {
+                            val manifestItem = activeManifest?.items?.find { it.id == fileId }
+                            val written = writtenBytesPerFile[fileId] ?: 0L
+                            try {
+                                writer.close()
+                                if (manifestItem != null && written >= manifestItem.size) {
+                                    val finishedFile = File(storageManager.downloadDirectory, manifestItem.name)
+                                    onFileFinished(fileId, finishedFile)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        fileWriters.clear()
+                        val allCompleted = activeManifest != null && activeManifest.items.all { item ->
+                            (writtenBytesPerFile[item.id] ?: 0L) >= item.size
+                        }
+                        onComplete(allCompleted)
                         break
                     }
                 }
@@ -388,8 +516,15 @@ class MulticastGroupManager @Inject constructor(
             fileWriters.values.forEach { try { it.close() } catch (_: Exception) {} }
         } catch (e: Exception) {
             Log.e(TAG, "Multicast receiver error", e)
+            onComplete(false)
         } finally {
-            try { socket?.leaveGroup(groupAddress) } catch (_: Exception) {}
+            try {
+                if (wifiIf != null) {
+                    socket?.leaveGroup(groupSocketAddress, wifiIf)
+                } else {
+                    socket?.leaveGroup(groupAddress)
+                }
+            } catch (_: Exception) {}
             socket?.close()
             activeSocket = null
             releaseMulticastLock()

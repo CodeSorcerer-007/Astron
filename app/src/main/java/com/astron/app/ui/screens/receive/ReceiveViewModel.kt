@@ -3,6 +3,7 @@ package com.astron.app.ui.screens.receive
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.astron.app.core.model.SessionState
 import com.astron.app.core.model.TransferManifest
 import com.astron.app.core.model.TransferSession
 import com.astron.app.core.util.NetworkUtils
@@ -71,6 +72,11 @@ class ReceiveViewModel @Inject constructor(
     }
 
     fun startReceiver() {
+        val currentState = session.value?.state
+        if (currentState == SessionState.TRANSFERRING || currentState == SessionState.VERIFYING) {
+            // Already actively receiving a transfer - do not interrupt or reset session
+            return
+        }
         transferEngine.onIncomingTransferPrompt = { manifest ->
             val deferred = CompletableDeferred<Boolean>()
             _pendingManifest.value = manifest
@@ -123,7 +129,11 @@ class ReceiveViewModel @Inject constructor(
                 port = PairingUtils.DEFAULT_PORT
             )
         }
-        _qrBitmap.value = QrCodeGenerator.generateQrBitmap(payload, size = 320)
+        _qrBitmap.value = try {
+            QrCodeGenerator.generateQrBitmap(payload, size = 320)
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     fun acceptIncomingTransfer() {
@@ -134,12 +144,19 @@ class ReceiveViewModel @Inject constructor(
         approvalDeferred?.complete(false)
     }
 
-    fun stopReceiver() {
+    fun stopReceiver(force: Boolean = false) {
+        val currentState = session.value?.state
+        if (!force && (currentState == SessionState.TRANSFERRING || currentState == SessionState.VERIFYING || currentState == SessionState.COMPLETED)) {
+            // Transfer is in progress or completed, do not cancel or teardown
+            return
+        }
         approvalDeferred?.complete(false)
         approvalDeferred = null
         _pendingManifest.value = null
         transferEngine.onIncomingTransferPrompt = null
-        transferEngine.cancelTransfer()
+        if (currentState != SessionState.COMPLETED && currentState != SessionState.FAILED) {
+            transferEngine.cancelTransfer()
+        }
         transferEngine.lanTransport.stopAdvertising()
         transferEngine.lanTransport.stopReceiverServer()
         if (_isHotspotMode.value) {
@@ -150,6 +167,6 @@ class ReceiveViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        stopReceiver()
+        stopReceiver(force = false)
     }
 }

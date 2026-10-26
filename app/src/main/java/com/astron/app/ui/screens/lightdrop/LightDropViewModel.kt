@@ -1,13 +1,19 @@
 package com.astron.app.ui.screens.lightdrop
 
 import android.graphics.Bitmap
+import android.content.Context
+import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.astron.app.core.model.TransferItem
 import com.astron.app.core.storage.StorageManager
 import com.astron.app.transport.lightdrop.LightDropManager
 import com.astron.app.transport.lightdrop.OpticalDensity
 import com.astron.app.transport.lightdrop.OpticalFrame
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +26,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class LightDropViewModel @Inject constructor(
+    @param:ApplicationContext private val context: Context,
     private val lightDropManager: LightDropManager,
     private val storageManager: StorageManager
 ) : ViewModel() {
@@ -42,6 +49,9 @@ class LightDropViewModel @Inject constructor(
     private val _currentFrameBitmap = MutableStateFlow<Bitmap?>(null)
     val currentFrameBitmap: StateFlow<Bitmap?> = _currentFrameBitmap.asStateFlow()
 
+    private val _activeFileName = MutableStateFlow<String?>("Air-Gapped Zero-Radio Demo.txt")
+    val activeFileName: StateFlow<String?> = _activeFileName.asStateFlow()
+
     private val _isTransmitting = MutableStateFlow(false)
     val isTransmitting: StateFlow<Boolean> = _isTransmitting.asStateFlow()
 
@@ -55,6 +65,7 @@ class LightDropViewModel @Inject constructor(
     val completedFile: StateFlow<File?> = _completedFile.asStateFlow()
 
     private var currentActiveFile: File? = null
+    private var currentActiveItem: TransferItem? = null
     private var transmitJob: Job? = null
 
     init {
@@ -71,8 +82,11 @@ class LightDropViewModel @Inject constructor(
 
     fun setDensity(newDensity: OpticalDensity) {
         _density.value = newDensity
+        val item = currentActiveItem
         val file = currentActiveFile
-        if (file != null) {
+        if (item != null) {
+            prepareTransferItem(item)
+        } else if (file != null) {
             prepareFile(file)
         } else {
             prepareDemoData()
@@ -81,8 +95,10 @@ class LightDropViewModel @Inject constructor(
 
     fun prepareDemoData() {
         currentActiveFile = null
+        currentActiveItem = null
+        _activeFileName.value = "Air-Gapped Zero-Radio Demo.txt"
         val demoPayload = "Astron Optical LightDrop — Ultra-secure air-gapped zero-radio transfer protocol. SHA-256 verified.".toByteArray()
-        val generatedFrames = lightDropManager.encodeBytesToFrames(demoPayload, density = _density.value)
+        val generatedFrames = lightDropManager.encodeBytesToFrames(demoPayload, density = _density.value, fileName = "demo.txt")
         _frames.value = generatedFrames
         _currentFrameIndex.value = 0
         if (generatedFrames.isNotEmpty()) {
@@ -93,14 +109,62 @@ class LightDropViewModel @Inject constructor(
     fun prepareFile(file: File) {
         try {
             currentActiveFile = file
-            val generatedFrames = lightDropManager.encodeFileToFrames(file, density = _density.value)
+            currentActiveItem = null
+            _activeFileName.value = file.name
+            val generatedFrames = lightDropManager.encodeFileToFrames(file, density = _density.value, fileName = file.name)
             _frames.value = generatedFrames
             _currentFrameIndex.value = 0
             if (generatedFrames.isNotEmpty()) {
                 _currentFrameBitmap.value = lightDropManager.renderFrameBitmap(generatedFrames[0])
             }
         } catch (e: Exception) {
-            // file too large or unreadable
+            Log.e("LightDropVM", "Error preparing file: ${e.message}")
+        }
+    }
+
+    fun prepareTransferItem(item: TransferItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                currentActiveItem = item
+                currentActiveFile = item.realFilePath?.let { File(it) }
+                _activeFileName.value = item.name
+                val stream = try {
+                    if (item.uri != null) {
+                        context.contentResolver.openInputStream(item.uri!!)
+                    } else if (item.realFilePath != null) {
+                        File(item.realFilePath!!).inputStream()
+                    } else null
+                } catch (_: Throwable) { null }
+
+                val bytes = stream?.use { it.readBytes() } ?: item.name.toByteArray(Charsets.UTF_8)
+                val generated = lightDropManager.encodeBytesToFrames(
+                    bytes = bytes,
+                    density = _density.value,
+                    fileName = item.name
+                )
+                _frames.value = generated
+                _currentFrameIndex.value = 0
+                if (generated.isNotEmpty()) {
+                    _currentFrameBitmap.value = lightDropManager.renderFrameBitmap(generated[0])
+                }
+            } catch (t: Throwable) {
+                Log.e("LightDropVM", "Error preparing transfer item", t)
+            }
+        }
+    }
+
+    fun prepareFiles(items: List<TransferItem>) {
+        if (items.isNotEmpty()) {
+            prepareTransferItem(items.first())
+        }
+    }
+
+    fun preparePickedUri(uri: Uri) {
+        try {
+            val item = storageManager.queryTransferItem(uri)
+            prepareTransferItem(item)
+        } catch (t: Throwable) {
+            Log.e("LightDropVM", "Error preparing picked uri", t)
         }
     }
 
@@ -147,7 +211,9 @@ class LightDropViewModel @Inject constructor(
     private fun assembleReceivedFile() {
         try {
             val sortedFrames = _receivedFrames.value.values.sortedBy { it.frameIndex }
-            val target = File(storageManager.getAstronDownloadDirectory(), "lightdrop_${System.currentTimeMillis()}.bin")
+            val detectedName = sortedFrames.firstOrNull { !it.fileName.isNullOrBlank() }?.fileName
+                ?: "lightdrop_${System.currentTimeMillis()}.bin"
+            val target = storageManager.createDestinationFile(detectedName)
             target.outputStream().use { fos ->
                 for (f in sortedFrames) {
                     fos.write(f.payload)
@@ -155,7 +221,7 @@ class LightDropViewModel @Inject constructor(
             }
             _completedFile.value = target
         } catch (t: Throwable) {
-            android.util.Log.e("LightDropVM", "Failed assembling optical frames", t)
+            Log.e("LightDropVM", "Failed assembling optical frames", t)
         }
     }
 

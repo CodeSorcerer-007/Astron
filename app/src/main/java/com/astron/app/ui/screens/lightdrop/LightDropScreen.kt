@@ -27,9 +27,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.WarningAmber
+import com.astron.app.core.model.TransferItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -82,6 +84,7 @@ import com.google.accompanist.permissions.rememberPermissionState
 @Composable
 fun LightDropScreen(
     onNavigateBack: () -> Unit,
+    sharedFiles: List<TransferItem> = emptyList(),
     viewModel: LightDropViewModel = hiltViewModel()
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
@@ -145,7 +148,7 @@ fun LightDropScreen(
                 Spacer(modifier = Modifier.height(18.dp))
 
                 if (selectedTab == 0) {
-                    TransmitOpticalView(viewModel)
+                    TransmitOpticalView(viewModel, sharedFiles)
                 } else {
                     if (!cameraPermissionState.status.isGranted) {
                         CameraPermissionGate(onRequestPermission = { cameraPermissionState.launchPermissionRequest() })
@@ -209,15 +212,31 @@ fun CameraPermissionGate(onRequestPermission: () -> Unit) {
 }
 
 @Composable
-fun TransmitOpticalView(viewModel: LightDropViewModel) {
+fun TransmitOpticalView(
+    viewModel: LightDropViewModel,
+    sharedFiles: List<TransferItem> = emptyList()
+) {
     val frames by viewModel.frames.collectAsState()
     val currentFrameIndex by viewModel.currentFrameIndex.collectAsState()
     val currentBitmap by viewModel.currentFrameBitmap.collectAsState()
     val fps by viewModel.fps.collectAsState()
     val density by viewModel.density.collectAsState()
+    val activeFileName by viewModel.activeFileName.collectAsState()
 
-    LaunchedEffect(Unit) {
-        viewModel.prepareDemoData()
+    val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.preparePickedUri(uri)
+        }
+    }
+
+    LaunchedEffect(sharedFiles) {
+        if (sharedFiles.isNotEmpty()) {
+            viewModel.prepareFiles(sharedFiles)
+        } else if (viewModel.frames.value.isEmpty()) {
+            viewModel.prepareDemoData()
+        }
         viewModel.startTransmission()
     }
 
@@ -245,7 +264,44 @@ fun TransmitOpticalView(viewModel: LightDropViewModel) {
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Selected File / File Picker Button
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceLight)
+                .border(1.dp, BorderLight, RoundedCornerShape(12.dp))
+                .clickable { filePickerLauncher.launch(arrayOf("*/*")) }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.AttachFile,
+                contentDescription = "Pick file",
+                tint = CosmicCyan,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = activeFileName ?: "Select File to Stream",
+                color = TextPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Choose File",
+                color = CosmicCyan,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Animated Frame QR Display
         Box(

@@ -35,7 +35,8 @@ data class OpticalFrame(
     val frameIndex: Int,
     val totalFrames: Int,
     val payload: ByteArray,
-    val checksumCrc32: Long
+    val checksumCrc32: Long,
+    val fileName: String? = null
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -63,7 +64,8 @@ class LightDropManager {
     fun encodeFileToFrames(
         file: File,
         sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt(),
-        density: OpticalDensity = OpticalDensity.BALANCED
+        density: OpticalDensity = OpticalDensity.BALANCED,
+        fileName: String? = file.name
     ): List<OpticalFrame> {
         require(file.length() <= MAX_OPTICAL_FILE_SIZE) {
             "File size (${file.length()} bytes) exceeds optical transfer limit (${MAX_OPTICAL_FILE_SIZE / (1024 * 1024)} MB)"
@@ -86,7 +88,8 @@ class LightDropManager {
                         frameIndex = frameIndex++,
                         totalFrames = totalFrames,
                         payload = chunk,
-                        checksumCrc32 = crc.value
+                        checksumCrc32 = crc.value,
+                        fileName = fileName
                     )
                 )
             }
@@ -98,7 +101,8 @@ class LightDropManager {
                     frameIndex = 0,
                     totalFrames = 1,
                     payload = ByteArray(0),
-                    checksumCrc32 = 0L
+                    checksumCrc32 = 0L,
+                    fileName = fileName
                 )
             )
         }
@@ -108,7 +112,8 @@ class LightDropManager {
     fun encodeBytesToFrames(
         bytes: ByteArray,
         sessionId: Int = (System.currentTimeMillis() and 0xFFFF).toInt(),
-        density: OpticalDensity = OpticalDensity.BALANCED
+        density: OpticalDensity = OpticalDensity.BALANCED,
+        fileName: String? = null
     ): List<OpticalFrame> {
         val chunkSize = density.chunkSize
         val totalFrames = ((bytes.size + chunkSize - 1) / chunkSize).coerceAtLeast(1)
@@ -128,7 +133,8 @@ class LightDropManager {
                     frameIndex = i,
                     totalFrames = totalFrames,
                     payload = chunkPayload,
-                    checksumCrc32 = crc.value
+                    checksumCrc32 = crc.value,
+                    fileName = fileName
                 )
             )
         }
@@ -137,17 +143,23 @@ class LightDropManager {
 
     /**
      * Formats an OpticalFrame into a compact visual transmission string.
-     * Format: ASTL:version:sessionId:frameIdx:totalFrames:crc32:base64Payload
+     * Format: ASTL:version:sessionId:frameIdx:totalFrames:crc32:base64Payload[:encodedFileName]
      */
     fun serializeFrame(frame: OpticalFrame): String {
         val b64 = Base64Compat.encodeToString(frame.payload)
-        return "ASTL:$PROTOCOL_VERSION:${frame.sessionId}:${frame.frameIndex}:${frame.totalFrames}:${frame.checksumCrc32}:$b64"
+        val base = "ASTL:$PROTOCOL_VERSION:${frame.sessionId}:${frame.frameIndex}:${frame.totalFrames}:${frame.checksumCrc32}:$b64"
+        return if (!frame.fileName.isNullOrBlank()) {
+            val encName = try { java.net.URLEncoder.encode(frame.fileName, "UTF-8") } catch (_: Throwable) { frame.fileName }
+            "$base:$encName"
+        } else {
+            base
+        }
     }
 
     /**
      * SENDER: Renders an optical frame into a high-contrast QR code bitmap for screen presentation.
      */
-    fun renderFrameBitmap(frame: OpticalFrame, size: Int = 512): Bitmap {
+    fun renderFrameBitmap(frame: OpticalFrame, size: Int = 512): Bitmap? {
         val payloadStr = serializeFrame(frame)
         return QrCodeGenerator.generateQrBitmap(payloadStr, size)
     }
@@ -169,6 +181,9 @@ class LightDropManager {
             val totalFrames = parts[4].toIntOrNull() ?: return null
             val expectedCrc = parts[5].toLongOrNull() ?: return null
             val b64Payload = parts[6]
+            val fileName = if (parts.size >= 8 && parts[7].isNotBlank()) {
+                try { java.net.URLDecoder.decode(parts[7], "UTF-8") } catch (_: Throwable) { parts[7] }
+            } else null
 
             val payload = Base64Compat.decode(b64Payload)
 
@@ -179,7 +194,7 @@ class LightDropManager {
                 return null
             }
 
-            return OpticalFrame(sessionId, frameIndex, totalFrames, payload, expectedCrc)
+            return OpticalFrame(sessionId, frameIndex, totalFrames, payload, expectedCrc, fileName)
         } catch (_: Exception) {
             return null
         }
@@ -191,9 +206,14 @@ class LightDropManager {
      */
     class ReceiverSession(val sessionId: Int, val totalFrames: Int) {
         private val collectedFrames = mutableMapOf<Int, ByteArray>()
+        var detectedFileName: String? = null
+            private set
 
         fun addFrame(frame: OpticalFrame): Boolean {
             if (frame.sessionId != sessionId) return false
+            if (!frame.fileName.isNullOrBlank() && detectedFileName == null) {
+                detectedFileName = frame.fileName
+            }
             collectedFrames[frame.frameIndex] = frame.payload
             return isComplete()
         }

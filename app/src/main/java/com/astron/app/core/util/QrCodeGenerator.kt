@@ -20,12 +20,16 @@ object QrCodeGenerator {
         size: Int = 512,
         foregroundColor: Int = Color.BLACK,
         backgroundColor: Int = Color.WHITE
-    ): Bitmap {
+    ): Bitmap? {
         if (content.isBlank() || size <= 0) {
             val safeSize = if (size > 0) size else 1
-            val bitmap = Bitmap.createBitmap(safeSize, safeSize, Bitmap.Config.ARGB_8888)
-            bitmap.eraseColor(backgroundColor)
-            return bitmap
+            return try {
+                val bitmap = Bitmap.createBitmap(safeSize, safeSize, Bitmap.Config.ARGB_8888)
+                bitmap?.eraseColor(backgroundColor)
+                bitmap
+            } catch (_: Throwable) {
+                null
+            }
         }
 
         val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
@@ -49,12 +53,16 @@ object QrCodeGenerator {
             }
 
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+            bitmap?.setPixels(pixels, 0, width, 0, 0, width, height)
             bitmap
         } catch (_: Throwable) {
-            val fallback = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            fallback.eraseColor(backgroundColor)
-            fallback
+            try {
+                val fallback = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                fallback?.eraseColor(backgroundColor)
+                fallback
+            } catch (_: Throwable) {
+                null
+            }
         }
     }
 }

@@ -94,7 +94,7 @@ fun SendScreen(
     onNavigateBack: () -> Unit,
     onTransferStarted: () -> Unit,
     onNavigateToWebDrop: (List<TransferItem>) -> Unit,
-    onNavigateToLightDrop: () -> Unit,
+    onNavigateToLightDrop: (List<TransferItem>) -> Unit = {},
     onNavigateToFileBrowser: (() -> Unit)? = null,
     initialUris: List<Uri> = emptyList(),
     initialItems: List<TransferItem> = emptyList(),
@@ -623,7 +623,7 @@ fun SendScreen(
                 onLightDropSelected = {
                     showRadarSheet = false
                     viewModel.stopDiscovery()
-                    onNavigateToLightDrop()
+                    onNavigateToLightDrop(selectedItems)
                 }
             )
         }

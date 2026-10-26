@@ -414,6 +414,9 @@ class TransferEngine(
                             groupOk = ok
                         }
                     )
+                    if (groupOk) {
+                        items.forEach { markFileVerified(it.id) }
+                    }
                     groupOk
                 }
 
@@ -677,6 +680,49 @@ class TransferEngine(
                     },
                     onFileFinished = { fileId, _ ->
                         markFileVerified(fileId)
+                    },
+                    onComplete = { success ->
+                        val s = _currentSession.value
+                        if (s != null && s.state == SessionState.TRANSFERRING) {
+                            TransferForegroundService.stop(context)
+                            _currentSession.update {
+                                it?.copy(
+                                    state = if (success) SessionState.COMPLETED else SessionState.FAILED,
+                                    transferredBytes = it.totalBytes,
+                                    speedBytesPerSec = 0L,
+                                    etaSeconds = 0L
+                                )
+                            }
+                            if (success) {
+                                scope.launch {
+                                    val soundEnabled = preferencesRepository.soundEnabledFlow.first()
+                                    soundFeedbackManager.playTransferComplete(soundEnabled)
+                                }
+                                AstronNotificationHelper.showTransferCompleteNotification(
+                                    context = context,
+                                    peerName = s.manifest?.senderDeviceName ?: "Multicast Group",
+                                    fileCount = s.items.size,
+                                    totalBytes = s.totalBytes,
+                                    isSender = false
+                                )
+                                scope.launch(Dispatchers.IO) {
+                                    persistenceManager?.markSessionComplete(s.sessionId)
+                                    historyRepository.addRecord(
+                                        TransferHistoryRecord(
+                                            id = s.sessionId,
+                                            peerName = s.manifest?.senderDeviceName ?: "Multicast Group",
+                                            direction = TransferDirection.RECEIVE,
+                                            fileCount = s.items.size,
+                                            totalBytes = s.totalBytes,
+                                            timestamp = System.currentTimeMillis(),
+                                            durationMs = 0L,
+                                            status = "Completed",
+                                            transportType = TransportType.MULTICAST_GROUP
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 )
             }
@@ -928,7 +974,11 @@ class TransferEngine(
             CoroutineScope(Dispatchers.IO).launch { upnpPortMapper.closePortMapping() }
         } catch (_: Throwable) {}
         TransferForegroundService.stop(context)
-        _currentSession.update { it?.copy(state = SessionState.CANCELLED) }
+        _currentSession.update { current ->
+            if (current != null && current.state != SessionState.COMPLETED && current.state != SessionState.FAILED) {
+                current.copy(state = SessionState.CANCELLED)
+            } else current
+        }
     }
 
     fun dismissSession() {
