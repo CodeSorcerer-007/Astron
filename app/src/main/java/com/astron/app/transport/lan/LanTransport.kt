@@ -108,7 +108,11 @@ class LanTransport(
     private var isDiscovering = false
     private val connectionSemaphore = Semaphore(3)
     private val approvedSessions = ConcurrentHashMap.newKeySet<String>()
+    private val approvedSessionKeys = ConcurrentHashMap<String, SecretKey>()
     private val sessionProgressMap = ConcurrentHashMap<String, AtomicLong>()
+    private val sessionSasMap = ConcurrentHashMap<String, String>()
+
+    fun getSasMnemonic(sessionId: String): String? = sessionSasMap[sessionId]
 
     /**
      * Starts advertising this device on the local network via NSD (mDNS).
@@ -259,11 +263,10 @@ class LanTransport(
         onProgress: (transferredBytes: Long, totalBytes: Long, activeFileName: String) -> Unit,
         onFileVerified: (fileId: String) -> Unit,
         isCancelled: () -> Boolean,
-        awaitUnpause: suspend () -> Unit = {}
+        awaitUnpause: suspend () -> Unit = {},
+        sessionTokenOverride: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val chunkSize = getChunkBufferSize(priority)
-        val sessionToken = CryptoManager.generateSessionToken(16)
-        val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
         val totalTransferred = AtomicLong(0L)
         val itemQueue = ConcurrentLinkedQueue(items)
 
@@ -296,18 +299,88 @@ class LanTransport(
 
             // 1. Handshake with session token for wire encryption and RTT measurement
             val handshakeStartNs = System.nanoTime()
-            outStream.writeByte(OP_HANDSHAKE_REQ.toInt())
-            outStream.writeUTF(manifest.sessionId)
-            outStream.writeUTF(manifest.senderDeviceName)
-            outStream.writeUTF(sessionToken)
-            outStream.flush()
+            val (sessionKey, sessionTokenForWorker) = if (sessionTokenOverride != null) {
+                val token = sessionTokenOverride
+                val key = CryptoManager.deriveKeyFromToken(token)
+                outStream.writeByte(OP_HANDSHAKE_REQ.toInt())
+                outStream.writeUTF(manifest.sessionId)
+                outStream.writeUTF(manifest.senderDeviceName)
+                outStream.writeUTF(token)
+                outStream.flush()
 
-            val respOp = inStream.readByte()
-            val rttMs = ((System.nanoTime() - handshakeStartNs) / 1_000_000L).coerceAtLeast(1L)
-            if (respOp != OP_HANDSHAKE_RESP) {
-                Log.e(TAG, "Invalid handshake response from receiver")
-                return@withContext false
+                val respOp = inStream.readByte()
+                if (respOp != OP_HANDSHAKE_RESP) {
+                    Log.e(TAG, "Invalid handshake response from receiver")
+                    return@withContext false
+                }
+                Pair(key, token)
+            } else {
+                val identityKp = CryptoManager.getOrCreateIdentityKeyPair(context)
+                val ephemeralKp = CryptoManager.generateEcKeyPair()
+                val sessionNonce = UUID.randomUUID().toString()
+                val ecdhToken = CryptoManager.createEcdhHandshakeToken(
+                    sessionId = manifest.sessionId,
+                    senderName = manifest.senderDeviceName,
+                    identityKeyPair = identityKp,
+                    ephemeralKeyPair = ephemeralKp,
+                    sessionNonce = sessionNonce
+                )
+                val senderFingerprint = CryptoManager.getPublicKeyFingerprint(identityKp.public)
+                val senderEphemeralPubB64 = CryptoManager.encodePublicKey(ephemeralKp.public)
+
+                outStream.writeByte(OP_HANDSHAKE_REQ.toInt())
+                outStream.writeUTF(manifest.sessionId)
+                outStream.writeUTF(manifest.senderDeviceName)
+                outStream.writeUTF(ecdhToken)
+                outStream.flush()
+
+                val respOp = inStream.readByte()
+                if (respOp != OP_HANDSHAKE_RESP) {
+                    Log.e(TAG, "Invalid handshake response from receiver")
+                    return@withContext false
+                }
+
+                val ecdhResp = inStream.readUTF()
+                if (!ecdhResp.startsWith("ASTRON_ECDH_RESP:")) {
+                    Log.e(TAG, "Expected ECDH handshake response, got: $ecdhResp")
+                    return@withContext false
+                }
+                val parts = ecdhResp.split(":")
+                if (parts.size < 4) {
+                    Log.e(TAG, "Malformed ECDH handshake response")
+                    return@withContext false
+                }
+                val receiverIdentityPubB64 = parts[1]
+                val receiverEphemeralPubB64 = parts[2]
+                val receiverSig = parts[3]
+
+                val receiverIdentityPub = CryptoManager.decodePublicKey(receiverIdentityPubB64)
+                val receiverEphemeralPub = CryptoManager.decodePublicKey(receiverEphemeralPubB64)
+                val receiverFingerprint = CryptoManager.getPublicKeyFingerprint(receiverIdentityPub)
+
+                val respToVerify = "${manifest.sessionId}:$sessionNonce:$receiverEphemeralPubB64".toByteArray(Charsets.UTF_8)
+                if (!CryptoManager.verifySignature(receiverIdentityPub, respToVerify, receiverSig)) {
+                    Log.e(TAG, "Receiver signature verification failed")
+                    return@withContext false
+                }
+
+                val sharedSecret = CryptoManager.computeSharedSecret(ephemeralKp.private, receiverEphemeralPub)
+                val key = CryptoManager.deriveSessionKeyEcdh(
+                    sharedSecret = sharedSecret,
+                    sessionNonce = sessionNonce,
+                    senderFingerprint = senderFingerprint,
+                    receiverFingerprint = receiverFingerprint,
+                    senderEphemeralPubBase64 = senderEphemeralPubB64,
+                    receiverEphemeralPubBase64 = receiverEphemeralPubB64
+                )
+                val sas = CryptoManager.generateSasMnemonic(key.encoded)
+                sessionSasMap[manifest.sessionId] = sas
+                approvedSessionKeys[manifest.sessionId] = key
+                Log.d(TAG, "ECDH session established with $receiverFingerprint. SAS: $sas")
+                Pair(key, "ASTRON_WORKER:${manifest.sessionId}")
             }
+
+            val rttMs = ((System.nanoTime() - handshakeStartNs) / 1_000_000L).coerceAtLeast(1L)
 
             // Dynamically scale chunk buffer size based on real-time RTT
             val dynamicChunkSize = calculateDynamicChunkSize(rttMs, priority)
@@ -380,7 +453,7 @@ class LanTransport(
                                     workerOut.writeByte(OP_HANDSHAKE_REQ.toInt())
                                     workerOut.writeUTF(manifest.sessionId)
                                     workerOut.writeUTF(manifest.senderDeviceName)
-                                    workerOut.writeUTF(sessionToken)
+                                    workerOut.writeUTF(sessionTokenForWorker)
                                     workerOut.flush()
 
                                     val wResp = workerIn.readByte()
@@ -633,10 +706,93 @@ class LanTransport(
             val sessionId = inStream.readUTF()
             val senderName = inStream.readUTF()
             val sessionToken = inStream.readUTF()
-            val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
 
-            outStream.writeByte(OP_HANDSHAKE_RESP.toInt())
-            outStream.flush()
+            val sessionKey: SecretKey = if (sessionToken.startsWith("ASTRON_ECDH:")) {
+                val parts = sessionToken.split(":")
+                if (parts.size < 6) {
+                    socket.close()
+                    return@withContext
+                }
+                val senderIdentityPubB64 = parts[1]
+                val senderEphemeralPubB64 = parts[2]
+                val timestamp = parts[3].toLongOrNull() ?: 0L
+                val sessionNonce = parts[4]
+                val signature = parts[5]
+
+                val senderIdentityPub = try {
+                    CryptoManager.decodePublicKey(senderIdentityPubB64)
+                } catch (_: Exception) {
+                    socket.close()
+                    return@withContext
+                }
+                val senderFingerprint = CryptoManager.getPublicKeyFingerprint(senderIdentityPub)
+
+                if (!CryptoManager.validateHandshakeTimestampAndNonce(senderFingerprint, timestamp, sessionNonce)) {
+                    Log.w(TAG, "Handshake timestamp or nonce rejected (replay defense)")
+                    socket.close()
+                    return@withContext
+                }
+
+                val signedData = "$sessionId:$senderName:$timestamp:$sessionNonce:$senderEphemeralPubB64".toByteArray(Charsets.UTF_8)
+                if (!CryptoManager.verifySignature(senderIdentityPub, signedData, signature)) {
+                    Log.w(TAG, "Sender ECDSA signature verification failed")
+                    socket.close()
+                    return@withContext
+                }
+
+                val senderEphemeralPub = try {
+                    CryptoManager.decodePublicKey(senderEphemeralPubB64)
+                } catch (_: Exception) {
+                    socket.close()
+                    return@withContext
+                }
+
+                val receiverEphemeralKp = CryptoManager.generateEcKeyPair()
+                val receiverEphemeralPubB64 = CryptoManager.encodePublicKey(receiverEphemeralKp.public)
+                val receiverIdentityKp = CryptoManager.getOrCreateIdentityKeyPair(context)
+                val receiverIdentityPubB64 = CryptoManager.encodePublicKey(receiverIdentityKp.public)
+                val receiverFingerprint = CryptoManager.getPublicKeyFingerprint(receiverIdentityKp.public)
+
+                val respToSign = "$sessionId:$sessionNonce:$receiverEphemeralPubB64".toByteArray(Charsets.UTF_8)
+                val respSig = CryptoManager.sign(receiverIdentityKp.private, respToSign)
+
+                val sharedSecret = CryptoManager.computeSharedSecret(receiverEphemeralKp.private, senderEphemeralPub)
+                val derivedKey = CryptoManager.deriveSessionKeyEcdh(
+                    sharedSecret = sharedSecret,
+                    sessionNonce = sessionNonce,
+                    senderFingerprint = senderFingerprint,
+                    receiverFingerprint = receiverFingerprint,
+                    senderEphemeralPubBase64 = senderEphemeralPubB64,
+                    receiverEphemeralPubBase64 = receiverEphemeralPubB64
+                )
+
+                approvedSessionKeys[sessionId] = derivedKey
+                val sas = CryptoManager.generateSasMnemonic(derivedKey.encoded)
+                sessionSasMap[sessionId] = sas
+                Log.d(TAG, "Accepted ECDH session from $senderFingerprint. SAS: $sas")
+
+                outStream.writeByte(OP_HANDSHAKE_RESP.toInt())
+                outStream.writeUTF("ASTRON_ECDH_RESP:$receiverIdentityPubB64:$receiverEphemeralPubB64:$respSig")
+                outStream.flush()
+
+                derivedKey
+            } else if (sessionToken.startsWith("ASTRON_WORKER:")) {
+                val existingKey = approvedSessionKeys[sessionId]
+                if (existingKey == null) {
+                    Log.w(TAG, "Unknown session for worker stream: $sessionId")
+                    socket.close()
+                    return@withContext
+                }
+                outStream.writeByte(OP_HANDSHAKE_RESP.toInt())
+                outStream.flush()
+                existingKey
+            } else {
+                val derivedKey = CryptoManager.deriveKeyFromToken(sessionToken)
+                approvedSessionKeys[sessionId] = derivedKey
+                outStream.writeByte(OP_HANDSHAKE_RESP.toInt())
+                outStream.flush()
+                derivedKey
+            }
 
             // 2. Read Manifest
             val manifestOp = inStream.readByte()
@@ -769,11 +925,15 @@ class LanTransport(
                         outStream.writeByte(OP_TRANSFER_COMPLETE.toInt())
                         outStream.flush()
                         sessionProgressMap.remove(parsedManifest.sessionId)
+                        approvedSessionKeys.remove(parsedManifest.sessionId)
+                        sessionSasMap.remove(parsedManifest.sessionId)
                         onTransferCompleted?.invoke(parsedManifest.sessionId)
                         break
                     }
                     OP_CANCEL -> {
                         sessionProgressMap.remove(parsedManifest.sessionId)
+                        approvedSessionKeys.remove(parsedManifest.sessionId)
+                        sessionSasMap.remove(parsedManifest.sessionId)
                         onTransferFailed?.invoke(parsedManifest.sessionId, "Cancelled by sender")
                         break
                     }
@@ -783,6 +943,8 @@ class LanTransport(
             Log.e(TAG, "Error handling incoming LAN transfer", e)
             manifest?.sessionId?.let { sId ->
                 sessionProgressMap.remove(sId)
+                approvedSessionKeys.remove(sId)
+                sessionSasMap.remove(sId)
                 onTransferFailed?.invoke(sId, e.message ?: "Transfer error")
             }
         } finally {
@@ -797,6 +959,8 @@ class LanTransport(
         } catch (_: Exception) {}
         serverSocket = null
         approvedSessions.clear()
+        approvedSessionKeys.clear()
         sessionProgressMap.clear()
+        sessionSasMap.clear()
     }
 }
