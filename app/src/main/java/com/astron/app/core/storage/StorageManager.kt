@@ -76,6 +76,14 @@ class StorageManager(private val context: Context) {
         }
         val sanitized = CryptoManager.sanitizeFilename(name)
         var file = File(targetDir, sanitized)
+
+        // Strict canonical path boundary enforcement to prevent path traversal
+        val canonicalDest = file.canonicalFile
+        val canonicalBase = baseDir.canonicalFile
+        if (!canonicalDest.path.startsWith(canonicalBase.path)) {
+            throw SecurityException("Path traversal attempt detected: $relativePath / $name")
+        }
+
         var counter = 1
         val base = file.nameWithoutExtension
         val ext = file.extension.let { if (it.isNotBlank()) ".$it" else "" }
@@ -214,6 +222,13 @@ class StorageManager(private val context: Context) {
         }
 
         var candidate = File(targetDir, sanitizedName)
+
+        // Strict canonical path boundary enforcement to prevent path traversal
+        val canonicalDest = candidate.canonicalFile
+        val canonicalBase = baseDir.canonicalFile
+        if (!canonicalDest.path.startsWith(canonicalBase.path)) {
+            throw SecurityException("Path traversal attempt detected: $relativePath / $rawName")
+        }
 
         if (candidate.exists()) {
             if (isResume) {

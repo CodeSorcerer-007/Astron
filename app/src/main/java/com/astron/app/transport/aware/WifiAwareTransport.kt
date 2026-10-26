@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import com.astron.app.core.model.PeerDevice
 import com.astron.app.core.model.TransportType
+import com.astron.app.core.util.NetworkUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -152,7 +153,7 @@ class WifiAwareTransport @Inject constructor(
                 val peer = PeerDevice(
                     id = "aware_${peerHandle.hashCode()}",
                     name = peerName,
-                    hostAddress = "192.168.49.1",
+                    hostAddress = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1",
                     port = 52737,
                     transportType = TransportType.WIFI_AWARE
                 )
