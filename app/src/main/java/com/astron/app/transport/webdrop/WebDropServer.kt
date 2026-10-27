@@ -22,6 +22,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.CipherInputStream
+import javax.crypto.spec.GCMParameterSpec
 
 class WebDropServer(
     private val context: Context,
@@ -86,7 +89,7 @@ class WebDropServer(
 
         this@WebDropServer.deviceName = deviceName
         this@WebDropServer.sharedFiles = filesToShare
-        this@WebDropServer.sessionToken = customToken ?: CryptoManager.generateSessionToken(8)
+        this@WebDropServer.sessionToken = customToken ?: CryptoManager.generateSessionToken(16)
         this@WebDropServer.executor = java.util.concurrent.Executors.newFixedThreadPool(4) { runnable ->
             Thread(runnable, "WebDrop-Worker").apply { isDaemon = true }
         }
@@ -261,26 +264,74 @@ class WebDropServer(
                         send413(outStream, "Encrypted upload exceeds browser memory safe limit of 50 MB")
                         return
                     }
-                    // Decrypt client-side AES-256-GCM uploaded payload
-                    val encryptedBytes = ByteArray(contentLength.toInt())
-                    var totalRead = 0
-                    while (totalRead < contentLength) {
-                        val read = inStream.read(encryptedBytes, totalRead, (contentLength - totalRead).toInt())
-                        if (read == -1) break
-                        totalRead += read
-                    }
-                    if (totalRead.toLong() < contentLength) {
-                        send400(outStream, "Premature end of upload stream")
+                    if (contentLength < 28L) { // 12-byte IV + 16-byte GCM tag minimum
+                        send400(outStream, "Payload too small for encrypted stream")
                         return
                     }
-                    val secretKey = CryptoManager.deriveKeyFromToken(sessionToken)
-                    val decrypted = try {
-                        CryptoManager.decryptAesGcm(encryptedBytes, secretKey)
+                    val tempEncFile = File.createTempFile("wb_enc_", ".tmp", targetFile.parentFile)
+                    val tempDecFile = File.createTempFile("wb_dec_", ".tmp", targetFile.parentFile)
+                    try {
+                        tempEncFile.outputStream().use { fos ->
+                            val buffer = ByteArray(64 * 1024)
+                            var bytesRemaining = contentLength
+                            while (bytesRemaining > 0) {
+                                val toRead = minOf(buffer.size.toLong(), bytesRemaining).toInt()
+                                val read = inStream.read(buffer, 0, toRead)
+                                if (read == -1) break
+                                fos.write(buffer, 0, read)
+                                bytesRemaining -= read
+                            }
+                            if (bytesRemaining > 0) {
+                                send400(outStream, "Premature end of upload stream")
+                                return
+                            }
+                        }
+
+                        // Stream decrypt from tempEncFile to tempDecFile using CipherInputStream with 64KB buffer
+                        val secretKey = CryptoManager.deriveKeyFromToken(sessionToken)
+                        tempEncFile.inputStream().use { fis ->
+                            val iv = ByteArray(12)
+                            var ivRead = 0
+                            while (ivRead < 12) {
+                                val r = fis.read(iv, ivRead, 12 - ivRead)
+                                if (r == -1) break
+                                ivRead += r
+                            }
+                            if (ivRead < 12) {
+                                send400(outStream, "Failed reading IV")
+                                return
+                            }
+
+                            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                            cipher.init(
+                                Cipher.DECRYPT_MODE,
+                                secretKey,
+                                GCMParameterSpec(128, iv)
+                            )
+
+                            CipherInputStream(fis, cipher).use { cis ->
+                                tempDecFile.outputStream().use { fos ->
+                                    val decBuffer = ByteArray(64 * 1024)
+                                    var r: Int
+                                    while (cis.read(decBuffer).also { r = it } != -1) {
+                                        fos.write(decBuffer, 0, r)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!tempDecFile.renameTo(targetFile)) {
+                            tempDecFile.copyTo(targetFile, overwrite = true)
+                            tempDecFile.delete()
+                        }
                     } catch (t: Throwable) {
+                        tempDecFile.delete()
                         send400(outStream, "Failed to decrypt upload payload: invalid key or corrupted stream")
                         return
+                    } finally {
+                        tempEncFile.delete()
+                        tempDecFile.delete()
                     }
-                    targetFile.writeBytes(decrypted)
                 } else {
                     targetFile.outputStream().use { fos ->
                         val buffer = ByteArray(64 * 1024)
@@ -537,6 +588,30 @@ class WebDropServer(
                     Array.from(files).forEach(f => totalBytes += f.size);
                     const fileLoaded = new Array(files.length).fill(0);
 
+                    let audioCtx = null;
+                    function playWebChime(frequency, durationMs, type = 'sine') {
+                        try {
+                            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            if (audioCtx.state === 'suspended') audioCtx.resume();
+                            const osc = audioCtx.createOscillator();
+                            const gain = audioCtx.createGain();
+                            osc.type = type;
+                            osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+                            gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + (durationMs / 1000));
+                            osc.connect(gain);
+                            gain.connect(audioCtx.destination);
+                            osc.start();
+                            osc.stop(audioCtx.currentTime + (durationMs / 1000));
+                        } catch (_) {}
+                    }
+                    function playSuccessChord() {
+                        playWebChime(523.25, 180, 'sine');
+                        setTimeout(() => playWebChime(659.25, 200, 'sine'), 80);
+                        setTimeout(() => playWebChime(783.99, 360, 'sine'), 160);
+                    }
+
+                    playWebChime(440, 100, 'sine');
                     let startTime = Date.now();
                     let uploaded = 0;
 
@@ -590,6 +665,7 @@ class WebDropServer(
                             };
                             xhr.onload = () => {
                                 uploaded++;
+                                playWebChime(659.25, 80, 'sine');
                                 resolve();
                             };
                             xhr.onerror = () => reject(new Error('Upload failed'));
@@ -599,11 +675,17 @@ class WebDropServer(
 
                     fill.style.width = '100%';
                     telemetryPercent.textContent = '100% (Completed)';
+                    playSuccessChord();
+
                     setTimeout(() => {
-                        alert('All ' + files.length + ' file(s) uploaded successfully to $safeDeviceName!');
                         bar.style.display = 'none';
                         telemetryRow.style.display = 'none';
                         fill.style.width = '0%';
+                        const toast = document.createElement('div');
+                        toast.textContent = '⚡ ' + files.length + ' file(s) delivered to $safeDeviceName!';
+                        toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#00E5FF;color:#070A12;padding:12px 24px;border-radius:999px;font-weight:700;font-size:14px;box-shadow:0 8px 30px rgba(0,229,255,0.4);z-index:9999;transition:all 0.3s ease;';
+                        document.body.appendChild(toast);
+                        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 3500);
                     }, 400);
                 }
             </script>

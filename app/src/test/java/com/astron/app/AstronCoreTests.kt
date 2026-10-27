@@ -145,4 +145,20 @@ class AstronCoreTests {
         assertEquals(2, decoded.items.size)
         assertEquals("photo.jpg", decoded.items[0].name)
     }
+
+    @Test
+    fun testRelayControlMessageProtocolSerialization() {
+        val json = Json { ignoreUnknownKeys = true }
+        val msg = com.astron.app.transport.internet.RelayControlMessage(
+            type = "FILE_START",
+            sessionId = "sess-001",
+            pairingCode = "998877",
+            role = "SENDER",
+            payload = "zero-byte-file-id"
+        )
+        val encoded = json.encodeToString(msg)
+        val decoded = json.decodeFromString<com.astron.app.transport.internet.RelayControlMessage>(encoded)
+        assertEquals("FILE_START", decoded.type)
+        assertEquals("zero-byte-file-id", decoded.payload)
+    }
 }

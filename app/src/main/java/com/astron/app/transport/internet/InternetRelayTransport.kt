@@ -152,26 +152,52 @@ class InternetRelayTransport @Inject constructor(
                     if (isCancelled()) break
                     awaitUnpause()
 
-                    val inputStream = openItemInputStream(item) ?: continue
-                    val md5OrSha = MessageDigest.getInstance("SHA-256")
+                    // Send FILE_START control message
+                    val startMsg = RelayControlMessage(
+                        type = "FILE_START",
+                        sessionId = manifest.sessionId,
+                        pairingCode = pairingCode,
+                        role = "SENDER",
+                        payload = item.id
+                    )
+                    send(Frame.Text(json.encodeToString(startMsg)))
 
-                    inputStream.use { stream ->
-                        var bytesRead: Int
-                        while (stream.read(buffer).also { bytesRead = it } != -1) {
-                            if (isCancelled()) break
-                            awaitUnpause()
+                    if (item.size > 0L) {
+                        val inputStream = openItemInputStream(item)
+                        if (inputStream != null) {
+                            val md5OrSha = MessageDigest.getInstance("SHA-256")
+                            inputStream.use { stream ->
+                                var bytesRead: Int
+                                while (stream.read(buffer).also { bytesRead = it } != -1) {
+                                    if (isCancelled()) break
+                                    awaitUnpause()
 
-                            val rawChunk = if (bytesRead == CHUNK_SIZE) buffer else buffer.copyOf(bytesRead)
-                            md5OrSha.update(rawChunk)
-                            val encryptedChunk = CryptoManager.encryptPayload(rawChunk, sessionKey)
+                                    val rawChunk = if (bytesRead == CHUNK_SIZE) buffer else buffer.copyOf(bytesRead)
+                                    md5OrSha.update(rawChunk)
+                                    val encryptedChunk = CryptoManager.encryptPayload(rawChunk, sessionKey)
 
-                            // Send binary frame
-                            send(Frame.Binary(true, encryptedChunk))
+                                    // Send binary frame
+                                    send(Frame.Binary(true, encryptedChunk))
 
-                            totalTransferred += bytesRead
-                            onProgress(totalTransferred, totalBytes, item.name)
+                                    totalTransferred += bytesRead
+                                    onProgress(totalTransferred, totalBytes, item.name)
+                                }
+                            }
                         }
+                    } else {
+                        // 0-byte file: report progress directly
+                        onProgress(totalTransferred, totalBytes, item.name)
                     }
+
+                    // Send FILE_END control message
+                    val endMsg = RelayControlMessage(
+                        type = "FILE_END",
+                        sessionId = manifest.sessionId,
+                        pairingCode = pairingCode,
+                        role = "SENDER",
+                        payload = item.id
+                    )
+                    send(Frame.Text(json.encodeToString(endMsg)))
 
                     onFileVerified(item.id)
                 }
@@ -242,6 +268,34 @@ class InternetRelayTransport @Inject constructor(
                 var totalTransferred = 0L
                 var currentSha = MessageDigest.getInstance("SHA-256")
 
+                fun finishCurrentFile(markCompleted: Boolean = true) {
+                    currentOutputStream?.flush()
+                    try { currentOutputStream?.close() } catch (_: Exception) {}
+                    currentOutputStream = null
+
+                    val currentItem = manifest?.items?.getOrNull(currentItemIndex)
+                    if (markCompleted && currentItem != null && currentOutputFile != null) {
+                        val computedHash = currentSha.digest().joinToString("") { "%02x".format(it) }
+                        val expectedHash = currentItem.checksumSha256
+                        val verified = expectedHash == null || expectedHash.equals(computedHash, ignoreCase = true)
+                        onFileCompleted(currentItem.id, currentOutputFile!!, verified)
+                    }
+                    currentOutputFile = null
+                }
+
+                fun prepareFile(index: Int) {
+                    currentItemIndex = index
+                    val activeManifest = manifest ?: return
+                    if (index in activeManifest.items.indices) {
+                        val item = activeManifest.items[index]
+                        val f = storageManager.createDestinationFile(item.name, item.relativePath)
+                        currentOutputFile = f
+                        currentOutputStream = java.io.FileOutputStream(f)
+                        currentSha = MessageDigest.getInstance("SHA-256")
+                        currentFileTransferred = 0L
+                    }
+                }
+
                 for (frame in incoming) {
                     if (isCancelled()) break
                     awaitUnpause()
@@ -250,38 +304,52 @@ class InternetRelayTransport @Inject constructor(
                         is Frame.Text -> {
                             val text = frame.readText()
                             val msg = try { json.decodeFromString<RelayControlMessage>(text) } catch (e: Exception) { null }
-                            if (msg?.type == "MANIFEST") {
-                                val encryptedBytes = android.util.Base64.decode(msg.payload, android.util.Base64.NO_WRAP)
-                                val decryptedBytes = CryptoManager.decryptPayload(encryptedBytes, sessionKey)
-                                val manifestString = String(decryptedBytes, Charsets.UTF_8)
-                                val parsedManifest = json.decodeFromString<TransferManifest>(manifestString)
+                            when (msg?.type) {
+                                "MANIFEST" -> {
+                                    val encryptedBytes = android.util.Base64.decode(msg.payload, android.util.Base64.NO_WRAP)
+                                    val decryptedBytes = CryptoManager.decryptPayload(encryptedBytes, sessionKey)
+                                    val manifestString = String(decryptedBytes, Charsets.UTF_8)
+                                    val parsedManifest = json.decodeFromString<TransferManifest>(manifestString)
 
-                                val accepted = onIncomingManifest(parsedManifest)
-                                if (!accepted) {
-                                    send(Frame.Text(json.encodeToString(RelayControlMessage("REJECT", msg.sessionId, pairingCode, "RECEIVER"))))
+                                    val accepted = onIncomingManifest(parsedManifest)
+                                    if (!accepted) {
+                                        send(Frame.Text(json.encodeToString(RelayControlMessage("REJECT", msg.sessionId, pairingCode, "RECEIVER"))))
+                                        break
+                                    }
+                                    manifest = parsedManifest
+                                }
+                                "FILE_START" -> {
+                                    finishCurrentFile(markCompleted = false)
+                                    val itemIdx = manifest?.items?.indexOfFirst { it.id == msg.payload } ?: currentItemIndex
+                                    val targetIdx = if (itemIdx >= 0) itemIdx else currentItemIndex
+                                    prepareFile(targetIdx)
+                                    val item = manifest?.items?.getOrNull(targetIdx)
+                                    if (item != null) {
+                                        onProgress(totalTransferred, manifest.totalBytes, item.name)
+                                        if (item.size == 0L) {
+                                            finishCurrentFile(markCompleted = true)
+                                            currentItemIndex++
+                                        }
+                                    }
+                                }
+                                "FILE_END" -> {
+                                    finishCurrentFile(markCompleted = true)
+                                    currentItemIndex++
+                                }
+                                "COMPLETE" -> {
+                                    finishCurrentFile(markCompleted = true)
+                                    isTransferSuccess = true
                                     break
                                 }
-                                manifest = parsedManifest
-
-                                if (parsedManifest.items.isNotEmpty()) {
-                                    val firstItem = parsedManifest.items[0]
-                                    val f = storageManager.createDestinationFile(firstItem.name, firstItem.relativePath)
-                                    currentOutputFile = f
-                                    currentOutputStream = java.io.FileOutputStream(f)
-                                    currentSha = MessageDigest.getInstance("SHA-256")
-                                    currentFileTransferred = 0L
-                                }
-                            } else if (msg?.type == "COMPLETE") {
-                                currentOutputStream?.flush()
-                                currentOutputStream?.close()
-                                isTransferSuccess = true
-                                break
                             }
                         }
 
                         is Frame.Binary -> {
                             val encryptedChunk = frame.readBytes()
                             val chunk = CryptoManager.decryptPayload(encryptedChunk, sessionKey)
+                            if (currentOutputStream == null) {
+                                prepareFile(currentItemIndex)
+                            }
                             currentOutputStream?.write(chunk)
                             currentSha.update(chunk)
                             currentFileTransferred += chunk.size
@@ -293,28 +361,8 @@ class InternetRelayTransport @Inject constructor(
 
                             // Check if current file finished
                             if (currentItem != null && currentFileTransferred >= currentItem.size) {
-                                currentOutputStream?.flush()
-                                currentOutputStream?.close()
-                                currentOutputStream = null
-
-                                val computedHash = currentSha.digest().joinToString("") { "%02x".format(it) }
-                                val expectedHash = currentItem.checksumSha256
-                                val verified = expectedHash == null || expectedHash.equals(computedHash, ignoreCase = true)
-
-                                currentOutputFile?.let { completedFile ->
-                                    onFileCompleted(currentItem.id, completedFile, verified)
-                                }
-
+                                finishCurrentFile(markCompleted = true)
                                 currentItemIndex++
-                                val activeManifest = manifest
-                                if (activeManifest != null && currentItemIndex < activeManifest.items.size) {
-                                    val nextItem = activeManifest.items[currentItemIndex]
-                                    val f = storageManager.createDestinationFile(nextItem.name, nextItem.relativePath)
-                                    currentOutputFile = f
-                                    currentOutputStream = java.io.FileOutputStream(f)
-                                    currentSha = MessageDigest.getInstance("SHA-256")
-                                    currentFileTransferred = 0L
-                                }
                             }
                         }
                         else -> Unit

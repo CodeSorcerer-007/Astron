@@ -33,7 +33,7 @@ object AppModule {
         context,
         AstronDatabase::class.java,
         AstronDatabase.DATABASE_NAME
-    ).fallbackToDestructiveMigration(true).build()
+    ).fallbackToDestructiveMigrationOnDowngrade(true).build()
 
     @Provides
     @Singleton

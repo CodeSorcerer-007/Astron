@@ -10,6 +10,7 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Environment
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.astron.app.core.model.PeerDevice
 import com.astron.app.core.model.TransferItem
 import com.astron.app.core.model.TransportType
@@ -187,11 +188,12 @@ class UsbOtgManager @Inject constructor(
             }
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                context.registerReceiver(receiver, filter)
-            }
+            ContextCompat.registerReceiver(
+                context,
+                receiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+            )
             usbReceiver = receiver
         } catch (_: Throwable) {
             // Intent filters with data schemes may require un-schemed filter on some platforms
@@ -200,7 +202,12 @@ class UsbOtgManager @Inject constructor(
                     addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
                     addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
                 }
-                context.registerReceiver(receiver, simpleFilter)
+                ContextCompat.registerReceiver(
+                    context,
+                    receiver,
+                    simpleFilter,
+                    ContextCompat.RECEIVER_EXPORTED
+                )
                 usbReceiver = receiver
             } catch (_: Throwable) {}
         }

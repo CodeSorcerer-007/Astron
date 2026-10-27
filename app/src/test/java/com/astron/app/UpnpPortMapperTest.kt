@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.URL
 
 class UpnpPortMapperTest {
 
@@ -57,5 +58,30 @@ class UpnpPortMapperTest {
         val xml = "<controlURL>  /ctl/IPConn  </controlURL>"
         val extracted = UpnpPortMapper.extractXmlTag(xml, "controlURL")
         assertEquals("/ctl/IPConn", extracted)
+    }
+
+    @Test
+    fun testResolveControlUrlWithDefaultPort() {
+        val baseUrl = URL("http://192.168.1.1/rootDesc.xml")
+        assertEquals(-1, baseUrl.port)
+
+        val resolved = UpnpPortMapper.resolveControlUrl(baseUrl, "/ctl/IPConn")
+        assertEquals("http://192.168.1.1/ctl/IPConn", resolved)
+    }
+
+    @Test
+    fun testResolveControlUrlWithExplicitPort() {
+        val baseUrl = URL("http://192.168.1.1:49152/desc.xml")
+        assertEquals(49152, baseUrl.port)
+
+        val resolved = UpnpPortMapper.resolveControlUrl(baseUrl, "/ctl/IPConn")
+        assertEquals("http://192.168.1.1:49152/ctl/IPConn", resolved)
+    }
+
+    @Test
+    fun testResolveControlUrlWithAbsoluteControlUrl() {
+        val baseUrl = URL("http://192.168.1.1:49152/desc.xml")
+        val resolved = UpnpPortMapper.resolveControlUrl(baseUrl, "http://192.168.1.254:5000/ctl")
+        assertEquals("http://192.168.1.254:5000/ctl", resolved)
     }
 }

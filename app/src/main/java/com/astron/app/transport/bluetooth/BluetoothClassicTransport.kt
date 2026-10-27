@@ -148,11 +148,12 @@ class BluetoothClassicTransport(private val context: Context) {
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                context.registerReceiver(receiver, filter)
-            }
+            ContextCompat.registerReceiver(
+                context,
+                receiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+            )
             discoveryReceiver = receiver
             adapter.startDiscovery()
             _discoveredDevices.value = emptyList()

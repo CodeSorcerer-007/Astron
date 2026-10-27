@@ -88,6 +88,20 @@ class MulticastGroupManager @Inject constructor(
             }
             return recovered
         }
+
+        fun sendNack(socket: MulticastSocket, groupAddress: InetAddress, fileId: String, chunkIndex: Int) {
+            val fBytes = fileId.toByteArray(Charsets.UTF_8)
+            val buf = ByteBuffer.allocate(4 + 1 + 2 + fBytes.size + 4)
+            buf.putInt(MAGIC)
+            buf.put(OP_NACK)
+            buf.putShort(fBytes.size.toShort())
+            buf.put(fBytes)
+            buf.putInt(chunkIndex)
+            try {
+                val packet = DatagramPacket(buf.array(), buf.array().size, groupAddress, MULTICAST_PORT)
+                socket.send(packet)
+            } catch (_: Exception) {}
+        }
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -173,6 +187,47 @@ class MulticastGroupManager @Inject constructor(
             }
 
             var totalBytesSent = 0L
+            val sentChunksCache = ConcurrentHashMap<String, ByteArray>()
+
+            fun handleIncomingNacks(timeoutMs: Int) {
+                val nackBuf = ByteArray(512)
+                val nackPacket = DatagramPacket(nackBuf, nackBuf.size)
+                val deadline = System.currentTimeMillis() + timeoutMs
+                while (System.currentTimeMillis() < deadline && !isCancelledFlag) {
+                    try {
+                        socket.soTimeout = maxOf(1, (deadline - System.currentTimeMillis()).toInt())
+                        socket.receive(nackPacket)
+                        val bb = ByteBuffer.wrap(nackPacket.data, 0, nackPacket.length)
+                        if (bb.remaining() >= 5 && bb.int == MAGIC && bb.get() == OP_NACK) {
+                            val nLen = bb.short.toInt() and 0xFFFF
+                            if (bb.remaining() >= nLen + 4) {
+                                val nBytes = ByteArray(nLen)
+                                bb.get(nBytes)
+                                val nackFileId = String(nBytes, Charsets.UTF_8)
+                                val nackChunkIdx = bb.int
+                                val cached = sentChunksCache["$nackFileId:$nackChunkIdx"]
+                                if (cached != null) {
+                                    val chunkCrc = computeCrc32(cached)
+                                    val nameBytes = nackFileId.toByteArray(Charsets.UTF_8)
+                                    val pb = ByteBuffer.allocate(4 + 1 + 2 + nameBytes.size + 4 + 4 + 8 + cached.size)
+                                    pb.putInt(MAGIC)
+                                    pb.put(OP_CHUNK)
+                                    pb.putShort(nameBytes.size.toShort())
+                                    pb.put(nameBytes)
+                                    pb.putInt(nackChunkIdx)
+                                    pb.putInt(cached.size)
+                                    pb.putLong(chunkCrc)
+                                    pb.put(cached)
+                                    val retx = DatagramPacket(pb.array(), pb.array().size, groupAddress, MULTICAST_PORT)
+                                    socket.send(retx)
+                                }
+                            }
+                        }
+                    } catch (_: java.net.SocketTimeoutException) {
+                        break
+                    } catch (_: Exception) {}
+                }
+            }
 
             // 2. Stream File Chunks with Forward Error Correction (FEC)
             for (item in items) {
@@ -196,6 +251,7 @@ class MulticastGroupManager @Inject constructor(
                         if (isCancelledFlag) break
                         val currentChunk = if (bytesRead == CHUNK_DATA_SIZE) chunkBuffer.copyOf() else chunkBuffer.copyOf(bytesRead)
                         fecBlockChunks.add(currentChunk)
+                        sentChunksCache["${item.id}:$chunkIndex"] = currentChunk
 
                         val chunkCrc = computeCrc32(currentChunk)
                         val nameBytes = item.id.toByteArray(Charsets.UTF_8)
@@ -261,6 +317,9 @@ class MulticastGroupManager @Inject constructor(
                 }
             }
 
+            // Allow receivers to request any missing chunks before completing
+            handleIncomingNacks(200)
+
             // 3. Announce Complete
             val completeBuf = ByteBuffer.allocate(5)
             completeBuf.putInt(MAGIC)
@@ -270,6 +329,7 @@ class MulticastGroupManager @Inject constructor(
                 socket.send(compPacket)
                 Thread.sleep(80)
             }
+            handleIncomingNacks(150)
 
             onComplete(!isCancelledFlag)
         } catch (e: Exception) {
@@ -484,6 +544,11 @@ class MulticastGroupManager @Inject constructor(
                                                     }
                                                 }
                                             }
+                                        } else if (missingInBlock.size > 1) {
+                                            // More than 1 chunk missing in block: Send OP_NACK for ARQ retransmission
+                                            for (missingChunkIndex in missingInBlock) {
+                                                sendNack(socket, groupAddress, fileId, missingChunkIndex)
+                                            }
                                         }
                                     }
                                 }
@@ -492,6 +557,67 @@ class MulticastGroupManager @Inject constructor(
                     }
 
                     OP_COMPLETE -> {
+                        // Check for any remaining missing chunks across all manifest items
+                        val missingChunks = mutableListOf<Pair<String, Int>>()
+                        activeManifest?.items?.forEach { item ->
+                            val totalFileChunks = ((item.size + CHUNK_DATA_SIZE - 1) / CHUNK_DATA_SIZE).toInt()
+                            val receivedSet = receivedChunksPerFile[item.id] ?: emptySet()
+                            for (cIdx in 0 until totalFileChunks) {
+                                if (!receivedSet.contains(cIdx)) {
+                                    missingChunks.add(item.id to cIdx)
+                                }
+                            }
+                        }
+
+                        if (missingChunks.isNotEmpty()) {
+                            for ((fId, cIdx) in missingChunks) {
+                                sendNack(socket, groupAddress, fId, cIdx)
+                            }
+                            // Listen briefly for arriving retransmitted OP_CHUNK packets
+                            val retxBuffer = ByteArray(2048)
+                            val retxPacket = DatagramPacket(retxBuffer, retxBuffer.size)
+                            val retxDeadline = System.currentTimeMillis() + 350
+                            while (System.currentTimeMillis() < retxDeadline && !isCancelledFlag) {
+                                try {
+                                    socket.soTimeout = maxOf(1, (retxDeadline - System.currentTimeMillis()).toInt())
+                                    socket.receive(retxPacket)
+                                    val bb = ByteBuffer.wrap(retxPacket.data, 0, retxPacket.length)
+                                    if (bb.remaining() >= 5 && bb.int == MAGIC && bb.get() == OP_CHUNK) {
+                                        val nLen = bb.short.toInt() and 0xFFFF
+                                        if (bb.remaining() >= nLen + 4 + 4 + 8) {
+                                            val nBytes = ByteArray(nLen)
+                                            bb.get(nBytes)
+                                            val fId = String(nBytes, Charsets.UTF_8)
+                                            val cIdx = bb.int
+                                            val pLen = bb.int
+                                            val cCrc = bb.long
+                                            if (pLen <= bb.remaining()) {
+                                                val payload = ByteArray(pLen)
+                                                bb.get(payload)
+                                                if (computeCrc32(payload) == cCrc) {
+                                                    val rcvSet = receivedChunksPerFile.getOrPut(fId) { ConcurrentHashMap.newKeySet() }
+                                                    if (rcvSet.add(cIdx)) {
+                                                        val mItem = activeManifest?.items?.find { it.id == fId }
+                                                        val fName = mItem?.name ?: "multicast_file_$fId"
+                                                        val writer = fileWriters.getOrPut(fId) {
+                                                            val dest = File(storageManager.downloadDirectory, fName)
+                                                            RandomAccessFile(dest, "rw")
+                                                        }
+                                                        writer.seek(cIdx.toLong() * CHUNK_DATA_SIZE)
+                                                        writer.write(payload)
+                                                        val prev = writtenBytesPerFile[fId] ?: 0L
+                                                        writtenBytesPerFile[fId] = prev + pLen
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (_: java.net.SocketTimeoutException) {
+                                    break
+                                } catch (_: Exception) {}
+                            }
+                        }
+
                         for ((fileId, writer) in fileWriters) {
                             val manifestItem = activeManifest?.items?.find { it.id == fileId }
                             val written = writtenBytesPerFile[fileId] ?: 0L

@@ -83,6 +83,16 @@ class UpnpPortMapper @Inject constructor(
             if (end == -1) return null
             return xml.substring(start + openTag.length, end).trim()
         }
+
+        fun resolveControlUrl(baseUrl: URL, controlTag: String): String {
+            val cleanTag = controlTag.trim()
+            return if (cleanTag.startsWith("http://") || cleanTag.startsWith("https://")) {
+                cleanTag
+            } else {
+                val portPart = if (baseUrl.port != -1) ":${baseUrl.port}" else ""
+                "${baseUrl.protocol}://${baseUrl.host}$portPart${if (cleanTag.startsWith("/")) "" else "/"}$cleanTag"
+            }
+        }
     }
 
     private var activeControlUrl: String? = null
@@ -194,68 +204,99 @@ class UpnpPortMapper @Inject constructor(
         }
     }
 
-    private fun parseControlUrlFromDescription(descriptionUrl: String): String? {
+    fun parseControlUrlFromDescription(descriptionUrl: String): String? {
         try {
             val url = URL(descriptionUrl)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 2000
-            conn.readTimeout = 2000
-            val xml = conn.inputStream.bufferedReader().use { it.readText() }
-
+            val xml = fetchHttpOverSocket(descriptionUrl, timeoutMs = 2500) ?: return null
             val controlTag = extractXmlTag(xml, "controlURL") ?: return null
-            return if (controlTag.startsWith("http://") || controlTag.startsWith("https://")) {
-                controlTag
-            } else {
-                "${url.protocol}://${url.host}:${url.port}${if (controlTag.startsWith("/")) "" else "/"}$controlTag"
-            }
+            return resolveControlUrl(url, controlTag)
         } catch (_: Exception) {
             return null
         }
     }
 
-    private fun sendSoapRequest(controlUrl: String, action: String, soapXml: String): Boolean {
-        try {
-            val url = URL(controlUrl)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.doOutput = true
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
-            conn.setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"")
-            conn.setRequestProperty("SOAPAction", "\"urn:schemas-upnp-org:service:WANIPConnection:1#$action\"")
+    private fun fetchHttpOverSocket(urlStr: String, timeoutMs: Int = 2500): String? {
+        var socket: java.net.Socket? = null
+        return try {
+            val url = URL(urlStr)
+            val port = if (url.port != -1) url.port else 80
+            val path = if (url.file.isNullOrBlank()) "/" else url.file
 
-            val bytes = soapXml.toByteArray(Charsets.UTF_8)
-            conn.setRequestProperty("Content-Length", bytes.size.toString())
+            socket = java.net.Socket().apply {
+                soTimeout = timeoutMs
+                connect(InetSocketAddress(url.host, port), timeoutMs)
+            }
+            val request = "GET $path HTTP/1.1\r\n" +
+                    "Host: ${url.host}:$port\r\n" +
+                    "Connection: close\r\n\r\n"
+            socket.getOutputStream().write(request.toByteArray(Charsets.UTF_8))
+            socket.getOutputStream().flush()
 
-            conn.outputStream.use { it.write(bytes) }
-            val code = conn.responseCode
-            return code in 200..299
+            val reader = socket.getInputStream().bufferedReader(Charsets.UTF_8)
+            val statusLine = reader.readLine() ?: return null
+            if (!statusLine.contains("200")) return null
+
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (line.isEmpty()) break
+            }
+            reader.readText()
         } catch (_: Exception) {
-            return false
+            null
+        } finally {
+            try { socket?.close() } catch (_: Exception) {}
         }
     }
 
-    private fun queryExternalIp(controlUrl: String): String? {
-        try {
-            val soapBody = buildSoapGetExternalIp()
+    private fun sendSoapOverSocket(controlUrl: String, action: String, soapXml: String, timeoutMs: Int = 3000): String? {
+        var socket: java.net.Socket? = null
+        return try {
             val url = URL(controlUrl)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.doOutput = true
-            conn.connectTimeout = 2500
-            conn.readTimeout = 2500
-            conn.setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"")
-            conn.setRequestProperty("SOAPAction", "\"urn:schemas-upnp-org:service:WANIPConnection:1#GetExternalIPAddress\"")
+            val port = if (url.port != -1) url.port else 80
+            val path = if (url.file.isNullOrBlank()) "/" else url.file
 
-            val bytes = soapBody.toByteArray(Charsets.UTF_8)
-            conn.outputStream.use { it.write(bytes) }
-
-            if (conn.responseCode in 200..299) {
-                val respXml = conn.inputStream.bufferedReader().use { it.readText() }
-                return extractXmlTag(respXml, "NewExternalIPAddress")
+            socket = java.net.Socket().apply {
+                soTimeout = timeoutMs
+                connect(InetSocketAddress(url.host, port), timeoutMs)
             }
-        } catch (_: Exception) {}
-        return null
+            val bytes = soapXml.toByteArray(Charsets.UTF_8)
+            val header = "POST $path HTTP/1.1\r\n" +
+                    "Host: ${url.host}:$port\r\n" +
+                    "Content-Type: text/xml; charset=\"utf-8\"\r\n" +
+                    "Content-Length: ${bytes.size}\r\n" +
+                    "SOAPAction: \"urn:schemas-upnp-org:service:WANIPConnection:1#$action\"\r\n" +
+                    "Connection: close\r\n\r\n"
+
+            val out = socket.getOutputStream()
+            out.write(header.toByteArray(Charsets.UTF_8))
+            out.write(bytes)
+            out.flush()
+
+            val reader = socket.getInputStream().bufferedReader(Charsets.UTF_8)
+            val statusLine = reader.readLine() ?: return null
+            if (!statusLine.contains("200") && !statusLine.contains("201")) return null
+
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (line.isEmpty()) break
+            }
+            reader.readText()
+        } catch (_: Exception) {
+            null
+        } finally {
+            try { socket?.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun sendSoapRequest(controlUrl: String, action: String, soapXml: String): Boolean {
+        val resp = sendSoapOverSocket(controlUrl, action, soapXml)
+        return resp != null
+    }
+
+    private fun queryExternalIp(controlUrl: String): String? {
+        val soapBody = buildSoapGetExternalIp()
+        val respXml = sendSoapOverSocket(controlUrl, "GetExternalIPAddress", soapBody) ?: return null
+        return extractXmlTag(respXml, "NewExternalIPAddress")
     }
 
     suspend fun closePortMapping() = withContext(Dispatchers.IO) {

@@ -1,9 +1,18 @@
 package com.astron.app.core.security
 
 import java.io.InputStream
+import java.security.KeyFactory
+import java.security.KeyPair
+import java.security.KeyPairGenerator
 import java.security.MessageDigest
+import java.security.PrivateKey
+import java.security.PublicKey
 import java.security.SecureRandom
+import java.security.spec.ECGenParameterSpec
+import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
+import javax.crypto.KeyAgreement
+import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -26,6 +35,91 @@ object CryptoManager {
     }
 
     /**
+     * Constant-time comparison between two byte arrays to eliminate timing side-channel attacks.
+     */
+    fun constantTimeEquals(a: ByteArray, b: ByteArray): Boolean {
+        return MessageDigest.isEqual(a, b)
+    }
+
+    /**
+     * Constant-time comparison between two strings (tokens, hashes) to eliminate timing attacks.
+     */
+    fun constantTimeEquals(a: String, b: String): Boolean {
+        return constantTimeEquals(a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
+    }
+
+    /**
+     * Generates an ephemeral NIST P-256 (secp256r1) Elliptic Curve KeyPair for Diffie-Hellman
+     * key exchange, enabling Perfect Forward Secrecy (PFS).
+     */
+    fun generateEcKeyPair(): KeyPair {
+        val kpg = KeyPairGenerator.getInstance("EC")
+        val ecSpec = ECGenParameterSpec("secp256r1")
+        kpg.initialize(ecSpec, secureRandom)
+        return kpg.generateKeyPair()
+    }
+
+    /**
+     * Exports a public key into standard X.509 DER encoded bytes for wire transmission.
+     */
+    fun exportPublicKey(publicKey: PublicKey): ByteArray {
+        return publicKey.encoded
+    }
+
+    /**
+     * Imports an X.509 DER encoded public key from wire bytes.
+     */
+    fun importPublicKey(encoded: ByteArray): PublicKey {
+        val keyFactory = KeyFactory.getInstance("EC")
+        return keyFactory.generatePublic(X509EncodedKeySpec(encoded))
+    }
+
+    /**
+     * Derives a 256-bit AES symmetric SecretKey using Elliptic Curve Diffie-Hellman (ECDH)
+     * and HKDF-SHA256 expansion, guaranteeing Perfect Forward Secrecy across sessions.
+     */
+    fun deriveSharedSecretEcdh(
+        privateKey: PrivateKey,
+        peerPublicKeyBytes: ByteArray,
+        salt: ByteArray = "Astron-ECDH-Salt-v1".toByteArray(Charsets.UTF_8),
+        info: String = "Astron-PFS-Session-Key"
+    ): SecretKey {
+        val peerPublicKey = importPublicKey(peerPublicKeyBytes)
+        val keyAgreement = KeyAgreement.getInstance("ECDH")
+        keyAgreement.init(privateKey)
+        keyAgreement.doPhase(peerPublicKey, true)
+        val rawSharedSecret = keyAgreement.generateSecret()
+
+        // Pass raw ECDH shared secret through HKDF-SHA256 for uniform entropy distribution
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(salt, "HmacSHA256"))
+        val prk = mac.doFinal(rawSharedSecret)
+
+        mac.init(SecretKeySpec(prk, "HmacSHA256"))
+        mac.update(info.toByteArray(Charsets.UTF_8))
+        mac.update(1.toByte())
+        val okm = mac.doFinal() // 32 bytes (256-bit key)
+        return SecretKeySpec(okm, "AES")
+    }
+
+    /**
+     * Computes an HMAC-SHA256 tag over arbitrary data using a SecretKey.
+     */
+    fun computeHmac(key: SecretKey, data: ByteArray): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key.encoded, "HmacSHA256"))
+        return mac.doFinal(data)
+    }
+
+    /**
+     * Constant-time HMAC-SHA256 verification.
+     */
+    fun verifyHmac(key: SecretKey, data: ByteArray, expectedHmac: ByteArray): Boolean {
+        val actual = computeHmac(key, data)
+        return constantTimeEquals(actual, expectedHmac)
+    }
+
+    /**
      * Derives an AES-256 secret key from an ephemeral session token using RFC 5869 HKDF-SHA256.
      */
     fun deriveKeyFromToken(
@@ -33,7 +127,7 @@ object CryptoManager {
         salt: ByteArray = "Astron-Wire-Salt-v1".toByteArray(Charsets.UTF_8),
         info: String = "Astron-v1-Transport"
     ): SecretKey {
-        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        val mac = Mac.getInstance("HmacSHA256")
         // HKDF-Extract: PRK = HMAC-Hash(salt, IKM)
         mac.init(SecretKeySpec(salt, "HmacSHA256"))
         val prk = mac.doFinal(token.toByteArray(Charsets.UTF_8))
@@ -138,3 +232,4 @@ object CryptoManager {
         return clean
     }
 }
+

@@ -45,6 +45,9 @@ Astron adheres to clean architectural separation with distinct layers:
 - **`model/Models.kt`**: Domain contracts. Defines `TransferItem`, `TransferManifest`, `ManifestItem`, `PeerDevice` (with optional hotspot credentials), `TransportType`, `TransferSession`, `TransferPriority`, and `TransferHistoryRecord`.
 - **`security/CryptoManager.kt`**:
   - Authenticated AES-256-GCM symmetric encryption and decryption.
+  - Ephemeral NIST P-256 (secp256r1) Elliptic Curve Diffie-Hellman (ECDH) key agreement for Perfect Forward Secrecy (PFS).
+  - Constant-time verification (`constantTimeEquals`) for tokens, hashes, and MAC tags to eliminate timing side-channel attacks.
+  - Authenticated HMAC-SHA256 packet signatures.
   - Hardware-accelerated SHA-256 streaming hashing via `MessageDigest`.
   - `sanitizeFilename(name)` path traversal defense stripping directory jumps (`../`), null bytes, control chars, and reserved OS symbols.
   - Ephemeral 32-character high-entropy pairing token generation.
@@ -99,6 +102,10 @@ Astron adheres to clean architectural separation with distinct layers:
   - SSDP M-SEARCH discovery of router Internet Gateway Devices (IGD).
   - SOAP RPC control protocol injecting temporary dynamic port mappings (`52737` -> `192.168.1.X:52737`) with automatic lease teardown.
   - Enables direct peer-to-peer socket transfers across the public internet without third-party relay servers.
+
+- **`stun/StunClient.kt` (RFC 5389 NAT Discovery & Traversal)**:
+  - Pure-Kotlin RFC 5389 / RFC 8489 STUN client discovering public WAN IP and reflexive UDP/TCP port mapping.
+  - Transparent fallback when router UPnP/NAT-PMP is disabled or on mobile hotspot networks.
 
 - **`multicast/MulticastGroupManager.kt` (Wi-Fi Multicast 1-to-Many Group)**:
   - 1-to-many UDP Multicast engine streaming on `239.255.42.99:52738`.

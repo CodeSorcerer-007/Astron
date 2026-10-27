@@ -77,4 +77,13 @@ class MulticastGroupTest {
             assertEquals(c1[i], recovered1[i])
         }
     }
+
+    @Test
+    fun testNackOpCodeAndPacketConstants() {
+        assertEquals(0x05.toByte(), MulticastGroupManager.OP_NACK)
+        assertEquals(0x01.toByte(), MulticastGroupManager.OP_ANNOUNCE)
+        assertEquals(0x02.toByte(), MulticastGroupManager.OP_CHUNK)
+        assertEquals(0x03.toByte(), MulticastGroupManager.OP_PARITY)
+        assertEquals(0x06.toByte(), MulticastGroupManager.OP_COMPLETE)
+    }
 }

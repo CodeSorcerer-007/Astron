@@ -14,6 +14,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -96,11 +97,12 @@ class WifiDirectManager(private val context: Context) {
             addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(p2pReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                context.registerReceiver(p2pReceiver, filter)
-            }
+            ContextCompat.registerReceiver(
+                context,
+                p2pReceiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+            )
             isReceiverRegistered = true
         } catch (t: Throwable) {
             Log.w(TAG, "Could not register P2P receiver: ${t.message}")
