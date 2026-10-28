@@ -23,6 +23,11 @@ object PermissionManager {
                 perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
             }
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_SCAN)
+            perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+            perms.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+        }
         perms.add(Manifest.permission.CAMERA)
         return perms
     }
@@ -92,7 +97,14 @@ object PermissionManager {
      * Checks if storage and media browsing permissions are granted.
      */
     fun hasStoragePermissions(context: Context): Boolean {
-        return getStoragePermissions().all { hasPermission(context, it) }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            hasPermission(context, Manifest.permission.READ_MEDIA_IMAGES) ||
+                    hasPermission(context, Manifest.permission.READ_MEDIA_VIDEO) ||
+                    hasPermission(context, Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            @Suppress("DEPRECATION")
+            hasPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
     }
 
     /**

@@ -15,6 +15,8 @@ import android.os.Build
 import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.astron.app.core.model.PeerDevice
+import com.astron.app.core.model.TransportType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -204,6 +206,41 @@ class WifiDirectManager(private val context: Context) {
             }
         } catch (_: Throwable) {}
     }
+
+    fun connect(deviceAddress: String, onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        initialize()
+        val ch = channel ?: run {
+            onError("Channel not initialized")
+            return
+        }
+        val config = WifiP2pConfig().apply {
+            this.deviceAddress = deviceAddress
+        }
+        try {
+            p2pManager?.connect(ch, config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d(TAG, "P2P connection initiated to $deviceAddress")
+                    onSuccess()
+                }
+                override fun onFailure(reason: Int) {
+                    val err = "P2P connect failed with code: $reason"
+                    Log.w(TAG, err)
+                    onError(err)
+                }
+            })
+        } catch (t: Throwable) {
+            onError("P2P connect exception: ${t.message}")
+        }
+    }
+
+    fun toPeerDevice(device: WifiP2pDevice): PeerDevice = PeerDevice(
+        id = device.deviceAddress,
+        name = device.deviceName.ifBlank { "Wi-Fi Direct Peer" },
+        hostAddress = DEFAULT_GO_IP,
+        port = 52737,
+        transportType = TransportType.WIFI_DIRECT,
+        signalStrength = 85
+    )
 
     fun teardown() {
         try {

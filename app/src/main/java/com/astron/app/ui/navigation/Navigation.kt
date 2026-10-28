@@ -92,14 +92,24 @@ fun MainNavigation(
         navigateBack()
     }
 
-    androidx.compose.runtime.LaunchedEffect(initialNfcPayload) {
-        if (initialNfcPayload != null && currentScreen != Screen.SEND && currentScreen != Screen.TRANSFER) {
-            navigateTo(Screen.SEND)
+    var showIntroSplash by rememberSaveable {
+        mutableStateOf(initialUris.isEmpty() && initialNfcPayload == null && initialDestination.isNullOrBlank())
+    }
+
+    androidx.compose.runtime.LaunchedEffect(initialUris) {
+        if (initialUris.isNotEmpty()) {
+            showIntroSplash = false
+            if (currentScreen != Screen.SEND && currentScreen != Screen.TRANSFER) {
+                navigateTo(Screen.SEND)
+            }
         }
     }
 
-    var showIntroSplash by rememberSaveable {
-        mutableStateOf(initialUris.isEmpty() && initialNfcPayload == null && initialDestination.isNullOrBlank())
+    androidx.compose.runtime.LaunchedEffect(initialNfcPayload) {
+        if (initialNfcPayload != null && currentScreen != Screen.SEND && currentScreen != Screen.TRANSFER) {
+            showIntroSplash = false
+            navigateTo(Screen.SEND)
+        }
     }
 
     androidx.compose.runtime.LaunchedEffect(initialDestination) {

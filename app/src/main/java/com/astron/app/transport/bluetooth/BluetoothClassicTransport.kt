@@ -27,6 +27,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -235,6 +236,17 @@ class BluetoothClassicTransport(private val context: Context) {
     // ─────────────────────────────────────────────────────────────────────────────
 
     /**
+     * Retrieves a remote [BluetoothDevice] by its MAC address.
+     */
+    fun getRemoteDevice(address: String): BluetoothDevice? {
+        return try {
+            bluetoothAdapter?.getRemoteDevice(address)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * Connects to [device] via RFCOMM using the Astron service UUID.
      * If the device is not yet bonded, pairing must be initiated separately.
      * Call from a background coroutine.
@@ -271,7 +283,7 @@ class BluetoothClassicTransport(private val context: Context) {
     // ─────────────────────────────────────────────────────────────────────────────
 
     /**
-     * Sends raw [data] bytes over [socket]. Prepends a 4-byte length header.
+     * Sends raw [data] bytes over [socket]. Prepends a length header and metadata.
      * All bytes are encrypted with AES-256-GCM using [sessionToken].
      */
     suspend fun sendStream(
@@ -279,6 +291,7 @@ class BluetoothClassicTransport(private val context: Context) {
         data: InputStream,
         totalBytes: Long,
         sessionToken: String,
+        fileName: String = "",
         onProgress: (Long) -> Unit = {},
         isActive: () -> Boolean = { true }
     ): Boolean = withContext(Dispatchers.IO) {
@@ -286,8 +299,10 @@ class BluetoothClassicTransport(private val context: Context) {
             val key = CryptoManager.deriveKeyFromToken(sessionToken)
             val out = DataOutputStream(socket.outputStream.buffered(8 * 1024))
 
-            // Header: protocol version + total size
+            // Header: protocol version + session token + file name + total size
             out.writeInt(PROTOCOL_VERSION)
+            out.writeUTF(sessionToken)
+            out.writeUTF(fileName)
             out.writeLong(totalBytes)
             out.flush()
 
@@ -307,11 +322,70 @@ class BluetoothClassicTransport(private val context: Context) {
             // Sentinel: chunk size of -1 signals end of stream
             out.writeInt(-1)
             out.flush()
-            Log.d(TAG, "BT send complete: $sentBytes bytes")
+            Log.d(TAG, "BT send complete: $sentBytes bytes for $fileName")
             true
         } catch (e: Throwable) {
             Log.e(TAG, "BT send error", e)
             false
+        }
+    }
+
+    data class BluetoothReceiveResult(
+        val file: File,
+        val fileName: String,
+        val bytesReceived: Long
+    )
+
+    /**
+     * Receives file from [socket] and writes it directly to storage, deriving key from transmitted token.
+     */
+    suspend fun receiveStreamToFile(
+        socket: BluetoothSocket,
+        storageManager: com.astron.app.core.storage.StorageManager,
+        sessionTokenFallback: String = "astron-bt",
+        onFileHeaderReceived: ((fileName: String, totalBytes: Long) -> Unit)? = null,
+        onProgress: (Long) -> Unit = {},
+        isActive: () -> Boolean = { true }
+    ): BluetoothReceiveResult? = withContext(Dispatchers.IO) {
+        try {
+            val input = DataInputStream(socket.inputStream.buffered(8 * 1024))
+
+            val version = input.readInt()
+            val token = try { input.readUTF() } catch (_: Throwable) { sessionTokenFallback }
+            val fileName = try { input.readUTF() } catch (_: Throwable) { "" }
+            val totalBytes = input.readLong()
+            Log.d(TAG, "BT receive: protocol v$version, file=$fileName, size=$totalBytes")
+
+            val safeName = if (fileName.isNotBlank()) CryptoManager.sanitizeFilename(fileName)
+                else "bt_incoming_${System.currentTimeMillis()}.bin"
+            val destFile = storageManager.createDestinationFile(safeName)
+            onFileHeaderReceived?.invoke(destFile.name, totalBytes)
+
+            val key = CryptoManager.deriveKeyFromToken(token.ifBlank { sessionTokenFallback })
+            var receivedBytes = 0L
+
+            destFile.outputStream().buffered(8 * 1024).use { output ->
+                while (isActive()) {
+                    val chunkSize = input.readInt()
+                    if (chunkSize == -1) break // End of stream sentinel
+                    if (chunkSize <= 0 || chunkSize > 64 * 1024) {
+                        Log.e(TAG, "Invalid BT chunk size: $chunkSize — aborting")
+                        return@withContext null
+                    }
+                    val encryptedChunk = ByteArray(chunkSize)
+                    input.readFully(encryptedChunk)
+                    val decrypted = CryptoManager.decryptAesGcm(encryptedChunk, key)
+                    output.write(decrypted)
+                    receivedBytes += decrypted.size
+                    onProgress(receivedBytes)
+                }
+                output.flush()
+            }
+            Log.d(TAG, "BT receive complete: $receivedBytes bytes to ${destFile.name}")
+            BluetoothReceiveResult(destFile, destFile.name, receivedBytes)
+        } catch (e: Throwable) {
+            Log.e(TAG, "BT receive error", e)
+            null
         }
     }
 
@@ -329,13 +403,15 @@ class BluetoothClassicTransport(private val context: Context) {
         isActive: () -> Boolean = { true }
     ): Long = withContext(Dispatchers.IO) {
         try {
-            val key = CryptoManager.deriveKeyFromToken(sessionToken)
             val input = DataInputStream(socket.inputStream.buffered(8 * 1024))
 
             val version = input.readInt()
+            val token = try { input.readUTF() } catch (_: Throwable) { sessionToken }
+            val fileName = try { input.readUTF() } catch (_: Throwable) { "" }
             val totalBytes = input.readLong()
-            Log.d(TAG, "BT receive: protocol v$version, expecting $totalBytes bytes")
+            Log.d(TAG, "BT receive: protocol v$version, expecting $totalBytes bytes for $fileName")
 
+            val key = CryptoManager.deriveKeyFromToken(token.ifBlank { sessionToken })
             var receivedBytes = 0L
 
             while (isActive()) {

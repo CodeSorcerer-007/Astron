@@ -357,24 +357,24 @@ class TransferEngine(
                     )
                 }
 
-                TransportType.BLUETOOTH -> {
-                    val paired = bluetoothTransport.getPairedDevices().find { it.address.equals(peer.hostAddress, ignoreCase = true) }
+                TransportType.BLUETOOTH, TransportType.BLE_BEACON -> {
+                    val targetDevice = bluetoothTransport.getPairedDevices().find { it.address.equals(peer.hostAddress, ignoreCase = true) }
                         ?: bluetoothTransport.discoveredDevices.value.find { it.address.equals(peer.hostAddress, ignoreCase = true) }
+                        ?: bluetoothTransport.getRemoteDevice(peer.hostAddress)
 
-                    if (paired != null) {
-                        val socket = bluetoothTransport.connectToDevice(paired)
+                    if (targetDevice != null) {
+                        val socket = bluetoothTransport.connectToDevice(targetDevice)
                         if (socket != null) {
                             var allOk = true
                             var totalBytesSent = 0L
                             for (item in items) {
                                 if (isCancelledFlag) break
-                                val itemUri = item.uri
-                                val itemPath = item.realFilePath
                                 val stream = try {
-                                    if (itemUri != null) context.contentResolver.openInputStream(itemUri)
-                                    else if (itemPath != null) File(itemPath).inputStream()
-                                    else null
-                                } catch (e: Exception) { null }
+                                    val uri = item.uri ?: android.net.Uri.parse(item.uriString)
+                                    storageManager.openInputStreamAtOffset(uri, 0L)
+                                } catch (_: Exception) {
+                                    item.realFilePath?.let { File(it).takeIf { f -> f.exists() }?.inputStream() }
+                                }
 
                                 if (stream == null) {
                                     allOk = false
@@ -386,6 +386,7 @@ class TransferEngine(
                                         data = inStream,
                                         totalBytes = item.size,
                                         sessionToken = sessionId,
+                                        fileName = item.name,
                                         onProgress = { bytes ->
                                             updateThroughputAndProgress(totalBytesSent + bytes, totalBytes, item.name, peer.name)
                                         },
@@ -460,8 +461,8 @@ class TransferEngine(
                     allOk
                 }
 
-                TransportType.HOTSPOT -> {
-                    // Auto-join hotspot if credentials provided
+                TransportType.HOTSPOT, TransportType.WIFI_DIRECT -> {
+                    // Auto-join hotspot or Wi-Fi Direct SoftAP if credentials provided
                     if (!peer.hotspotSsid.isNullOrBlank() && !peer.hotspotPass.isNullOrBlank()) {
                         val connectLatch = kotlinx.coroutines.CompletableDeferred<Boolean>()
                         hotspotManager.connectToHotspot(
@@ -632,16 +633,31 @@ class TransferEngine(
                     while (isActive && !isCancelledFlag) {
                         val socket = bluetoothTransport.startServer(timeoutMs = 120_000L) ?: continue
                         try {
-                            val destFile = storageManager.createDestinationFile("bt_incoming_${System.currentTimeMillis()}.bin")
-                            destFile.outputStream().use { outStream ->
-                                bluetoothTransport.receiveStream(
-                                    socket = socket,
-                                    output = outStream,
-                                    sessionToken = "astron-bt",
-                                    onProgress = { transferred ->
-                                        updateThroughputAndProgress(transferred, transferred, destFile.name, "Bluetooth Peer")
-                                    },
-                                    isActive = { !isCancelledFlag }
+                            var currentFileName = "Bluetooth File"
+                            var expectedTotal = 0L
+                            val receiveResult = bluetoothTransport.receiveStreamToFile(
+                                socket = socket,
+                                storageManager = storageManager,
+                                sessionTokenFallback = "astron-bt",
+                                onFileHeaderReceived = { fname, total ->
+                                    currentFileName = fname
+                                    expectedTotal = total
+                                    updateThroughputAndProgress(0L, total, fname, "Bluetooth Peer")
+                                },
+                                onProgress = { transferred ->
+                                    updateThroughputAndProgress(transferred, expectedTotal, currentFileName, "Bluetooth Peer")
+                                },
+                                isActive = { !isCancelledFlag }
+                            )
+                            if (receiveResult != null) {
+                                soundFeedbackManager.playTransferSuccess()
+                                historyRepository.recordTransfer(
+                                    fileName = receiveResult.fileName,
+                                    fileSize = receiveResult.bytesReceived,
+                                    peerName = "Bluetooth Peer",
+                                    direction = TransferDirection.RECEIVE,
+                                    transportType = TransportType.BLUETOOTH,
+                                    success = true
                                 )
                             }
                         } catch (e: Exception) {

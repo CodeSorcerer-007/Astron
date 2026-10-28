@@ -287,7 +287,7 @@ class WebDropServer(
                             }
                         }
 
-                        // Stream decrypt from tempEncFile to tempDecFile using CipherInputStream with 64KB buffer
+                        // Stream decrypt from tempEncFile to tempDecFile using AES-GCM
                         val secretKey = CryptoManager.deriveKeyFromToken(sessionToken)
                         tempEncFile.inputStream().use { fis ->
                             val iv = ByteArray(12)
@@ -309,14 +309,20 @@ class WebDropServer(
                                 GCMParameterSpec(128, iv)
                             )
 
-                            CipherInputStream(fis, cipher).use { cis ->
-                                tempDecFile.outputStream().use { fos ->
-                                    val decBuffer = ByteArray(64 * 1024)
-                                    var r: Int
-                                    while (cis.read(decBuffer).also { r = it } != -1) {
-                                        fos.write(decBuffer, 0, r)
+                            tempDecFile.outputStream().use { fos ->
+                                val encBuffer = ByteArray(64 * 1024)
+                                var r: Int
+                                while (fis.read(encBuffer).also { r = it } != -1) {
+                                    val out = cipher.update(encBuffer, 0, r)
+                                    if (out != null && out.isNotEmpty()) {
+                                        fos.write(out)
                                     }
                                 }
+                                val finalBlock = cipher.doFinal()
+                                if (finalBlock != null && finalBlock.isNotEmpty()) {
+                                    fos.write(finalBlock)
+                                }
+                                fos.flush()
                             }
                         }
 
@@ -527,16 +533,16 @@ class WebDropServer(
                     const keyMaterial = await window.crypto.subtle.importKey(
                         'raw',
                         enc.encode(token),
-                        { name: 'PBKDF2' },
+                        { name: 'HKDF' },
                         false,
                         ['deriveKey']
                     );
                     return await window.crypto.subtle.deriveKey(
                         {
-                            name: 'PBKDF2',
+                            name: 'HKDF',
+                            hash: 'SHA-256',
                             salt: enc.encode('Astron-Wire-Salt-v1'),
-                            iterations: 10000,
-                            hash: 'SHA-256'
+                            info: enc.encode('Astron-v1-Transport')
                         },
                         keyMaterial,
                         { name: 'AES-GCM', length: 256 },
@@ -775,8 +781,8 @@ class WebDropServer(
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00E5FF" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                     </div>
                     <h2>Session PIN Required</h2>
-                    <p>Enter the 8-character PIN displayed on <strong>$safeDevice</strong> to connect to Web Drop.</p>
-                    <input id="pinInput" maxlength="16" placeholder="Enter Session PIN" autofocus autocomplete="off" onkeydown="if(event.key==='Enter') unlock();">
+                    <p>Enter the session PIN or token displayed on <strong>$safeDevice</strong> to connect to Web Drop.</p>
+                    <input id="pinInput" maxlength="64" placeholder="Enter Session PIN" autofocus autocomplete="off" onkeydown="if(event.key==='Enter') unlock();">
                     <button onclick="unlock()">Connect to Web Drop</button>
                     <script>
                         function unlock() {

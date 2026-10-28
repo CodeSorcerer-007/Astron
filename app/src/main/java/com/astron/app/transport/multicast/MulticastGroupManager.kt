@@ -232,12 +232,12 @@ class MulticastGroupManager @Inject constructor(
             // 2. Stream File Chunks with Forward Error Correction (FEC)
             for (item in items) {
                 if (isCancelledFlag) break
-                val uri = item.uri
                 val inStream = try {
-                    if (uri != null) context.contentResolver.openInputStream(uri)
-                    else if (item.realFilePath != null) File(item.realFilePath!!).inputStream()
-                    else null
-                } catch (e: Exception) { null } ?: continue
+                    val fileUri = item.uri ?: android.net.Uri.parse(item.uriString)
+                    storageManager.openInputStreamAtOffset(fileUri, 0L)
+                } catch (_: Exception) {
+                    item.realFilePath?.let { File(it).takeIf { f -> f.exists() }?.inputStream() }
+                } ?: continue
 
                 _status.value = _status.value.copy(currentFileName = item.name)
 

@@ -35,6 +35,7 @@ class ReceiveViewModelTest {
     private val storageManager = StorageManager(dummyContext)
     private val preferencesRepository = PreferencesRepository(dummyContext)
     private val historyRepository = HistoryRepository(dummyContext)
+    private var engine: TransferEngine? = null
 
     @Before
     fun setUp() {
@@ -43,13 +44,15 @@ class ReceiveViewModelTest {
 
     @After
     fun tearDown() {
+        engine?.close()
+        engine = null
         Dispatchers.resetMain()
     }
 
     @Test
     fun testStopReceiverDoesNotCancelActiveTransfer() = runTest {
-        val engine = TransferEngine(dummyContext, storageManager, preferencesRepository, historyRepository)
-        val viewModel = ReceiveViewModel(engine, preferencesRepository)
+        val currentEngine = TransferEngine(dummyContext, storageManager, preferencesRepository, historyRepository).also { engine = it }
+        val viewModel = ReceiveViewModel(currentEngine, preferencesRepository)
 
         // Simulate active incoming transfer in progress
         val activeSession = TransferSession(
@@ -60,20 +63,21 @@ class ReceiveViewModelTest {
         val field = TransferEngine::class.java.getDeclaredField("_currentSession")
         field.isAccessible = true
         @Suppress("UNCHECKED_CAST")
-        val sessionFlow = field.get(engine) as MutableStateFlow<TransferSession?>
+        val sessionFlow = field.get(currentEngine) as MutableStateFlow<TransferSession?>
         sessionFlow.value = activeSession
 
         // Normal stopReceiver from ReceiveScreen disposal upon navigating to TransferScreen
         viewModel.stopReceiver(force = false)
 
         // Verify session was NOT cancelled
-        assertEquals(SessionState.TRANSFERRING, engine.currentSession.value?.state)
+        assertEquals(SessionState.TRANSFERRING, currentEngine.currentSession.value?.state)
+        currentEngine.close()
     }
 
     @Test
     fun testStopReceiverCancelsWhenForced() = runTest {
-        val engine = TransferEngine(dummyContext, storageManager, preferencesRepository, historyRepository)
-        val viewModel = ReceiveViewModel(engine, preferencesRepository)
+        val currentEngine = TransferEngine(dummyContext, storageManager, preferencesRepository, historyRepository).also { engine = it }
+        val viewModel = ReceiveViewModel(currentEngine, preferencesRepository)
 
         val activeSession = TransferSession(
             sessionId = UUID.randomUUID().toString(),
@@ -83,18 +87,19 @@ class ReceiveViewModelTest {
         val field = TransferEngine::class.java.getDeclaredField("_currentSession")
         field.isAccessible = true
         @Suppress("UNCHECKED_CAST")
-        val sessionFlow = field.get(engine) as MutableStateFlow<TransferSession?>
+        val sessionFlow = field.get(currentEngine) as MutableStateFlow<TransferSession?>
         sessionFlow.value = activeSession
 
         viewModel.stopReceiver(force = true)
 
-        assertEquals(SessionState.CANCELLED, engine.currentSession.value?.state)
+        assertEquals(SessionState.CANCELLED, currentEngine.currentSession.value?.state)
+        currentEngine.close()
     }
 
     @Test
     fun testStartReceiverDoesNotResetActiveTransfer() = runTest {
-        val engine = TransferEngine(dummyContext, storageManager, preferencesRepository, historyRepository)
-        val viewModel = ReceiveViewModel(engine, preferencesRepository)
+        val currentEngine = TransferEngine(dummyContext, storageManager, preferencesRepository, historyRepository).also { engine = it }
+        val viewModel = ReceiveViewModel(currentEngine, preferencesRepository)
 
         val activeSession = TransferSession(
             sessionId = "existing-session-123",
@@ -104,13 +109,14 @@ class ReceiveViewModelTest {
         val field = TransferEngine::class.java.getDeclaredField("_currentSession")
         field.isAccessible = true
         @Suppress("UNCHECKED_CAST")
-        val sessionFlow = field.get(engine) as MutableStateFlow<TransferSession?>
+        val sessionFlow = field.get(currentEngine) as MutableStateFlow<TransferSession?>
         sessionFlow.value = activeSession
 
         viewModel.startReceiver()
 
         // Session must be preserved
-        assertEquals("existing-session-123", engine.currentSession.value?.sessionId)
-        assertEquals(SessionState.TRANSFERRING, engine.currentSession.value?.state)
+        assertEquals("existing-session-123", currentEngine.currentSession.value?.sessionId)
+        assertEquals(SessionState.TRANSFERRING, currentEngine.currentSession.value?.state)
+        currentEngine.close()
     }
 }

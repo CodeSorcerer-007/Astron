@@ -27,7 +27,7 @@ class SendViewModel @Inject constructor(
     val discoveredPeers: StateFlow<List<PeerDevice>> = transferEngine.discoveredPeers
 
     fun initializeWithUris(uris: List<Uri>) {
-        if (uris.isEmpty() || _selectedItems.value.isNotEmpty()) return
+        if (uris.isEmpty()) return
         addUris(uris)
     }
 
