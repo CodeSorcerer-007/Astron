@@ -68,6 +68,13 @@ class SoundFeedbackManager : Closeable {
     }
 
     /**
+     * Alias for playTransferComplete.
+     */
+    fun playTransferSuccess(soundEnabled: Boolean = true) {
+        playTransferComplete(soundEnabled)
+    }
+
+    /**
      * Plays an alert pulse when an incoming peer requests file transfer approval.
      */
     fun playIncomingAlert(soundEnabled: Boolean = true) {

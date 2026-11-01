@@ -9,7 +9,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android_7.0+_(API_24+)--36-3DDC84?style=flat-square&logo=android&logoColor=white)](https://android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![Tests](https://img.shields.io/badge/Tests-145_Passing_(100%25)-success?style=flat-square&logo=checkmarx&logoColor=white)](docs/TEST_REPORT.md)
+[![Tests](https://img.shields.io/badge/Tests-150_Passing_(100%25)-success?style=flat-square&logo=checkmarx&logoColor=white)](docs/TEST_REPORT.md)
 [![Audit Score](https://img.shields.io/badge/Audit_Score-100%2F100_Gold_Master-brightgreen?style=flat-square&logo=security&logoColor=white)](docs/TEST_REPORT.md)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Download APK](https://img.shields.io/badge/Download-APK_(30.6_MB)-orange?style=flat-square&logo=googleplay&logoColor=white)](apk/app-debug.apk)

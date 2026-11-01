@@ -116,8 +116,11 @@ Astron adheres to clean architectural separation with distinct layers:
 ---
 
 ### 2.3 Transfer Management Layer (`com.astron.app.transfer` & `service`)
+- **`TransportRegistry.kt`**:
+  - Centralized registry encapsulating all 12+ transport implementations and lifecycle teardown.
+  - Decouples transport instantiation and lifecycle (`closeAll()`) from state coordination.
 - **`TransferEngine.kt`**:
-  - Central orchestrator coordinating sessions across LAN, Hotspot, Web Drop, and Light Drop.
+  - Central orchestrator coordinating sessions across LAN, Hotspot, Web Drop, Light Drop, and all transport routes via `TransportRegistry`.
   - Manages `StateFlow<TransferSession?>` with pause, resume, and cancellation mechanics.
   - Exponential Moving Average (EMA) transfer speed smoothing (`α = 0.25`).
   - Emits sensory audio feedback via `SoundFeedbackManager` on start, alert, and verified completion.
@@ -130,10 +133,12 @@ Astron adheres to clean architectural separation with distinct layers:
 ---
 
 ### 2.4 Presentation Layer (`com.astron.app.ui`)
-- **Cosmic Celestial Theme**: Modern OLED-optimized palette featuring Cosmic Cyan, Electric Blue, Stellar Violet, and Surface Elevation tokens.
+- **Modular Sub-Composable Architecture (`screens/home/components/`)**:
+  - Deconstructed `HomeScreen` into 10 high-cohesion, isolated composables: `HomeTopBar`, `HomeWifiWarningBanner`, `InterruptedSessionCard`, `StorageTelemetryCard`, `PrimaryActionCards`, `QuickActionsSuite`, `LatestFileCard`, `RecentTransfersCard`, `HomePermissionSheet`, `HomeDiagnosticsSheet`.
+- **Cosmic Celestial Theme**: Modern OLED-optimized palette featuring Cosmic Cyan, Electric Blue, Stellar Violet, and Surface Elevation tokens with dynamic CompositionLocal token switching.
 - **Dynamic Micro-Interactions**:
   - `CosmicStarfield`: Procedurally rendered twinkling canvas background across all primary screens.
-  - `DiagnosticsSheet`: Bottom modal displaying live network interfaces, local IPs, active ports, and storage metrics.
+  - `HomeDiagnosticsSheet`: Bottom modal displaying live network interfaces, local IPs, active ports, and storage metrics.
   - `TransferScreen`: Holographic speedometer gauge with live MB/s, ETA, and progress arc.
 
 ---

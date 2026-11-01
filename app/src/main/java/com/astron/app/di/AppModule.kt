@@ -189,11 +189,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTransferEngine(
-        @ApplicationContext context: Context,
-        storageManager: StorageManager,
-        preferencesRepository: PreferencesRepository,
-        historyRepository: HistoryRepository,
+    fun provideTransportRegistry(
         lanTransport: LanTransport,
         webDropServer: WebDropServer,
         lightDropManager: LightDropManager,
@@ -201,20 +197,13 @@ object AppModule {
         bluetoothTransport: com.astron.app.transport.bluetooth.BluetoothClassicTransport,
         internetRelayTransport: com.astron.app.transport.internet.InternetRelayTransport,
         transportOrchestrator: TransportOrchestrator,
-        persistenceManager: TransferPersistenceManager,
-        duplicateDetector: com.astron.app.core.storage.DuplicateDetector,
-        transferQueue: com.astron.app.transfer.TransferQueue,
         bleBeaconManager: com.astron.app.transport.ble.BleBeaconManager,
         upnpPortMapper: com.astron.app.transport.upnp.UpnpPortMapper,
         multicastGroupManager: com.astron.app.transport.multicast.MulticastGroupManager,
         wifiAwareTransport: com.astron.app.transport.aware.WifiAwareTransport,
         wifiDirectManager: com.astron.app.transport.p2p.WifiDirectManager,
         usbOtgManager: com.astron.app.transport.usb.UsbOtgManager
-    ): TransferEngine = TransferEngine(
-        context = context,
-        storageManager = storageManager,
-        preferencesRepository = preferencesRepository,
-        historyRepository = historyRepository,
+    ): com.astron.app.transport.TransportRegistry = com.astron.app.transport.TransportRegistry(
         lanTransport = lanTransport,
         webDropServer = webDropServer,
         lightDropManager = lightDropManager,
@@ -222,15 +211,34 @@ object AppModule {
         bluetoothTransport = bluetoothTransport,
         internetRelayTransport = internetRelayTransport,
         transportOrchestrator = transportOrchestrator,
-        persistenceManager = persistenceManager,
-        duplicateDetector = duplicateDetector,
-        transferQueue = transferQueue,
         bleBeaconManager = bleBeaconManager,
         upnpPortMapper = upnpPortMapper,
         multicastGroupManager = multicastGroupManager,
         wifiAwareTransport = wifiAwareTransport,
         wifiDirectManager = wifiDirectManager,
         usbOtgManager = usbOtgManager
+    )
+
+    @Provides
+    @Singleton
+    fun provideTransferEngine(
+        @ApplicationContext context: Context,
+        storageManager: StorageManager,
+        preferencesRepository: PreferencesRepository,
+        historyRepository: HistoryRepository,
+        transportRegistry: com.astron.app.transport.TransportRegistry,
+        persistenceManager: TransferPersistenceManager,
+        duplicateDetector: com.astron.app.core.storage.DuplicateDetector,
+        transferQueue: com.astron.app.transfer.TransferQueue
+    ): TransferEngine = TransferEngine(
+        context = context,
+        storageManager = storageManager,
+        preferencesRepository = preferencesRepository,
+        historyRepository = historyRepository,
+        transportRegistry = transportRegistry,
+        persistenceManager = persistenceManager,
+        duplicateDetector = duplicateDetector,
+        transferQueue = transferQueue
     )
 }
 

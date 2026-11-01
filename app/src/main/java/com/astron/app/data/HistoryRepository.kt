@@ -1,4 +1,4 @@
-﻿package com.astron.app.data
+package com.astron.app.data
 
 import android.content.Context
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
@@ -6,7 +6,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.astron.app.core.model.TransferDirection
 import com.astron.app.core.model.TransferHistoryRecord
+import com.astron.app.core.model.TransportType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -56,6 +58,29 @@ class HistoryRepository(private val context: Context) {
                 prefs[KEY_HISTORY_JSON] = json.encodeToString(trimmed)
             }
         } catch (_: Throwable) {}
+    }
+
+    suspend fun recordTransfer(
+        fileName: String,
+        fileSize: Long,
+        peerName: String,
+        direction: TransferDirection,
+        transportType: TransportType,
+        success: Boolean
+    ) {
+        addRecord(
+            TransferHistoryRecord(
+                id = java.util.UUID.randomUUID().toString(),
+                peerName = peerName,
+                direction = direction,
+                fileCount = 1,
+                totalBytes = fileSize,
+                timestamp = System.currentTimeMillis(),
+                durationMs = 0L,
+                status = if (success) "Completed" else "Failed",
+                transportType = transportType
+            )
+        )
     }
 
     suspend fun deleteRecord(id: String) = mutex.withLock {

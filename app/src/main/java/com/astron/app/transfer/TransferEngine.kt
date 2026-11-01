@@ -22,6 +22,7 @@ import com.astron.app.service.AstronNotificationHelper
 import com.astron.app.service.TransferForegroundService
 import com.astron.app.transport.CapabilityDetector
 import com.astron.app.transport.TransportOrchestrator
+import com.astron.app.transport.TransportRegistry
 import com.astron.app.transport.bluetooth.BluetoothClassicTransport
 import com.astron.app.transport.hotspot.HotspotManager
 import com.astron.app.transport.internet.InternetRelayTransport
@@ -52,24 +53,76 @@ class TransferEngine(
     val storageManager: StorageManager,
     val preferencesRepository: PreferencesRepository,
     val historyRepository: HistoryRepository,
-    val lanTransport: LanTransport = LanTransport(context, storageManager),
-    val webDropServer: WebDropServer = WebDropServer(context, storageManager),
-    val lightDropManager: LightDropManager = LightDropManager(),
+    val transportRegistry: TransportRegistry,
     val soundFeedbackManager: SoundFeedbackManager = SoundFeedbackManager(),
-    val hotspotManager: HotspotManager = HotspotManager(context),
-    val bluetoothTransport: BluetoothClassicTransport = BluetoothClassicTransport(context),
-    val internetRelayTransport: InternetRelayTransport = InternetRelayTransport(context, storageManager),
-    val transportOrchestrator: TransportOrchestrator = TransportOrchestrator(context),
     val persistenceManager: TransferPersistenceManager? = null,
     val duplicateDetector: DuplicateDetector = DuplicateDetector(storageManager),
-    val transferQueue: TransferQueue = TransferQueue(),
-    val bleBeaconManager: BleBeaconManager = BleBeaconManager(context),
-    val upnpPortMapper: UpnpPortMapper = UpnpPortMapper(context),
-    val multicastGroupManager: MulticastGroupManager = MulticastGroupManager(context, storageManager),
-    val wifiAwareTransport: com.astron.app.transport.aware.WifiAwareTransport = com.astron.app.transport.aware.WifiAwareTransport(context),
-    val wifiDirectManager: com.astron.app.transport.p2p.WifiDirectManager = com.astron.app.transport.p2p.WifiDirectManager(context),
-    val usbOtgManager: com.astron.app.transport.usb.UsbOtgManager = com.astron.app.transport.usb.UsbOtgManager(context)
+    val transferQueue: TransferQueue = TransferQueue()
 ) : Closeable {
+
+    constructor(
+        context: Context,
+        storageManager: StorageManager,
+        preferencesRepository: PreferencesRepository,
+        historyRepository: HistoryRepository,
+        lanTransport: LanTransport = LanTransport(context, storageManager),
+        webDropServer: WebDropServer = WebDropServer(context, storageManager),
+        lightDropManager: LightDropManager = LightDropManager(),
+        soundFeedbackManager: SoundFeedbackManager = SoundFeedbackManager(),
+        hotspotManager: HotspotManager = HotspotManager(context),
+        bluetoothTransport: BluetoothClassicTransport = BluetoothClassicTransport(context),
+        internetRelayTransport: InternetRelayTransport = InternetRelayTransport(context, storageManager),
+        transportOrchestrator: TransportOrchestrator = TransportOrchestrator(context),
+        persistenceManager: TransferPersistenceManager? = null,
+        duplicateDetector: DuplicateDetector = DuplicateDetector(storageManager),
+        transferQueue: TransferQueue = TransferQueue(),
+        bleBeaconManager: BleBeaconManager = BleBeaconManager(context),
+        upnpPortMapper: UpnpPortMapper = UpnpPortMapper(context),
+        multicastGroupManager: MulticastGroupManager = MulticastGroupManager(context, storageManager),
+        wifiAwareTransport: com.astron.app.transport.aware.WifiAwareTransport = com.astron.app.transport.aware.WifiAwareTransport(context),
+        wifiDirectManager: com.astron.app.transport.p2p.WifiDirectManager = com.astron.app.transport.p2p.WifiDirectManager(context),
+        usbOtgManager: com.astron.app.transport.usb.UsbOtgManager = com.astron.app.transport.usb.UsbOtgManager(context)
+    ) : this(
+        context = context,
+        storageManager = storageManager,
+        preferencesRepository = preferencesRepository,
+        historyRepository = historyRepository,
+        transportRegistry = TransportRegistry(
+            lanTransport = lanTransport,
+            webDropServer = webDropServer,
+            lightDropManager = lightDropManager,
+            hotspotManager = hotspotManager,
+            bluetoothTransport = bluetoothTransport,
+            internetRelayTransport = internetRelayTransport,
+            transportOrchestrator = transportOrchestrator,
+            bleBeaconManager = bleBeaconManager,
+            upnpPortMapper = upnpPortMapper,
+            multicastGroupManager = multicastGroupManager,
+            wifiAwareTransport = wifiAwareTransport,
+            wifiDirectManager = wifiDirectManager,
+            usbOtgManager = usbOtgManager
+        ),
+        soundFeedbackManager = soundFeedbackManager,
+        persistenceManager = persistenceManager,
+        duplicateDetector = duplicateDetector,
+        transferQueue = transferQueue
+    )
+
+    // Convenient accessors delegating to transportRegistry
+    val lanTransport: LanTransport get() = transportRegistry.lanTransport
+    val webDropServer: WebDropServer get() = transportRegistry.webDropServer
+    val lightDropManager: LightDropManager get() = transportRegistry.lightDropManager
+    val hotspotManager: HotspotManager get() = transportRegistry.hotspotManager
+    val bluetoothTransport: BluetoothClassicTransport get() = transportRegistry.bluetoothTransport
+    val internetRelayTransport: InternetRelayTransport get() = transportRegistry.internetRelayTransport
+    val transportOrchestrator: TransportOrchestrator get() = transportRegistry.transportOrchestrator
+    val bleBeaconManager: BleBeaconManager get() = transportRegistry.bleBeaconManager
+    val upnpPortMapper: UpnpPortMapper get() = transportRegistry.upnpPortMapper
+    val multicastGroupManager: MulticastGroupManager get() = transportRegistry.multicastGroupManager
+    val wifiAwareTransport: com.astron.app.transport.aware.WifiAwareTransport get() = transportRegistry.wifiAwareTransport
+    val wifiDirectManager: com.astron.app.transport.p2p.WifiDirectManager get() = transportRegistry.wifiDirectManager
+    val usbOtgManager: com.astron.app.transport.usb.UsbOtgManager get() = transportRegistry.usbOtgManager
+
     companion object {
         const val TAG = "TransferEngine"
         private const val SPEED_SMOOTHING_FACTOR = 0.25f // Exponential moving average weight
@@ -82,19 +135,7 @@ class TransferEngine(
     override fun close() {
         activeJob?.cancel()
         soundFeedbackManager.close()
-        hotspotManager.close()
-        bluetoothTransport.disconnect()
-        internetRelayTransport.close()
-        bleBeaconManager.stopBeacon()
-        bleBeaconManager.stopScanning()
-        multicastGroupManager.stopGroupTransfer()
-        wifiAwareTransport.stop()
-        wifiDirectManager.teardown()
-        usbOtgManager.teardown()
-        hotspotManager.disconnectFromHotspot()
-        try {
-            CoroutineScope(Dispatchers.IO).launch { upnpPortMapper.closePortMapping() }
-        } catch (_: Throwable) {}
+        transportRegistry.close()
         scope.cancel()
     }
 

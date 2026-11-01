@@ -579,5 +579,194 @@ class LanTransportIntegrationTest {
         val highLatencyRtt = LanTransport.calculateDynamicChunkSize(250L, com.astron.app.core.model.TransferPriority.BALANCED)
         assertEquals(32 * 1024, highLatencyRtt)
     }
+
+    @Test
+    fun testSocketLoopbackTransferWithEcdhHandshakeAndSha256() = runBlocking {
+        val serverSocket = ServerSocket(0)
+        val port = serverSocket.localPort
+        val targetFile = tempFolder.newFile("received_ecdh_stream.bin")
+
+        val payload = ByteArray(64 * 1024) { (it xor 0x5A).toByte() }
+        val originalSha256 = CryptoManager.computeSha256(payload.inputStream())
+
+        // Server coroutine (Receiver with ECDH)
+        val serverJob = async(Dispatchers.IO) {
+            val client = serverSocket.accept()
+            val inStream = DataInputStream(BufferedInputStream(client.getInputStream()))
+            val outStream = DataOutputStream(BufferedOutputStream(client.getOutputStream()))
+
+            // 1. Handshake with ECDH
+            val handshakeOp = inStream.readByte()
+            assertEquals(LanTransport.OP_HANDSHAKE_ECDH_REQ, handshakeOp)
+            val sessionId = inStream.readUTF()
+            val senderName = inStream.readUTF()
+            val senderKeyLen = inStream.readInt()
+            val senderPubKeyBytes = ByteArray(senderKeyLen)
+            inStream.readFully(senderPubKeyBytes)
+
+            val receiverKeyPair = CryptoManager.generateEcKeyPair()
+            val receiverPubKeyBytes = CryptoManager.exportPublicKey(receiverKeyPair.public)
+            val serverSessionKey = CryptoManager.deriveSharedSecretEcdh(
+                privateKey = receiverKeyPair.private,
+                peerPublicKeyBytes = senderPubKeyBytes,
+                salt = sessionId.toByteArray(Charsets.UTF_8),
+                info = "Astron-ECDH-Session-$sessionId"
+            )
+
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_ECDH_RESP.toInt())
+            outStream.writeInt(receiverPubKeyBytes.size)
+            outStream.write(receiverPubKeyBytes)
+            outStream.flush()
+
+            // 2. Manifest
+            val manifestOp = inStream.readByte()
+            assertEquals(LanTransport.OP_MANIFEST, manifestOp)
+            val manifestLen = inStream.readInt()
+            val manifestBytes = ByteArray(manifestLen)
+            inStream.readFully(manifestBytes)
+
+            outStream.writeByte(LanTransport.OP_MANIFEST_ACK.toInt())
+            outStream.flush()
+
+            // 3. File Start
+            val fileStartOp = inStream.readByte()
+            assertEquals(LanTransport.OP_FILE_START, fileStartOp)
+            inStream.readUTF() // id
+            inStream.readUTF() // name
+            inStream.readLong() // size
+
+            // 4. Chunk
+            val chunkOp = inStream.readByte()
+            assertEquals(LanTransport.OP_CHUNK, chunkOp)
+            val chunkLen = inStream.readInt()
+            val encBuffer = ByteArray(chunkLen)
+            inStream.readFully(encBuffer)
+
+            val decrypted = CryptoManager.decryptAesGcm(encBuffer, serverSessionKey)
+            targetFile.writeBytes(decrypted)
+
+            // 5. File End
+            val fileEndOp = inStream.readByte()
+            assertEquals(LanTransport.OP_FILE_END, fileEndOp)
+            inStream.readUTF()
+
+            // 6. Complete
+            val completeOp = inStream.readByte()
+            assertEquals(LanTransport.OP_TRANSFER_COMPLETE, completeOp)
+
+            client.close()
+            serverSocket.close()
+            targetFile.length()
+        }
+
+        // Client coroutine (Sender with ECDH)
+        val clientJob = async(Dispatchers.IO) {
+            val socket = Socket("127.0.0.1", port)
+            val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
+            val inStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
+
+            val senderKeyPair = CryptoManager.generateEcKeyPair()
+            val senderPubKeyBytes = CryptoManager.exportPublicKey(senderKeyPair.public)
+
+            outStream.writeByte(LanTransport.OP_HANDSHAKE_ECDH_REQ.toInt())
+            outStream.writeUTF("ecdh-test-session")
+            outStream.writeUTF("Sender-Astron")
+            outStream.writeInt(senderPubKeyBytes.size)
+            outStream.write(senderPubKeyBytes)
+            outStream.flush()
+
+            val respOp = inStream.readByte()
+            assertEquals(LanTransport.OP_HANDSHAKE_ECDH_RESP, respOp)
+            val recKeyLen = inStream.readInt()
+            val recPubKeyBytes = ByteArray(recKeyLen)
+            inStream.readFully(recPubKeyBytes)
+
+            val clientSessionKey = CryptoManager.deriveSharedSecretEcdh(
+                privateKey = senderKeyPair.private,
+                peerPublicKeyBytes = recPubKeyBytes,
+                salt = "ecdh-test-session".toByteArray(Charsets.UTF_8),
+                info = "Astron-ECDH-Session-ecdh-test-session"
+            )
+
+            // Manifest
+            val manifest = TransferManifest(
+                sessionId = "ecdh-test-session",
+                senderDeviceId = "dev-1",
+                senderDeviceName = "Sender-Astron",
+                totalFiles = 1,
+                totalBytes = payload.size.toLong(),
+                items = listOf(ManifestItem(id = "item-ecdh", name = "ecdh.dat", size = payload.size.toLong(), mimeType = "application/octet-stream"))
+            )
+            val mBytes = json.encodeToString(manifest).toByteArray(Charsets.UTF_8)
+            outStream.writeByte(LanTransport.OP_MANIFEST.toInt())
+            outStream.writeInt(mBytes.size)
+            outStream.write(mBytes)
+            outStream.flush()
+
+            assertEquals(LanTransport.OP_MANIFEST_ACK, inStream.readByte())
+
+            // File Start
+            outStream.writeByte(LanTransport.OP_FILE_START.toInt())
+            outStream.writeUTF("item-ecdh")
+            outStream.writeUTF("ecdh.dat")
+            outStream.writeLong(payload.size.toLong())
+
+            // Chunk with AES-GCM using clientSessionKey
+            val encryptedChunk = CryptoManager.encryptAesGcm(payload, clientSessionKey)
+            outStream.writeByte(LanTransport.OP_CHUNK.toInt())
+            outStream.writeInt(encryptedChunk.size)
+            outStream.write(encryptedChunk)
+
+            // File End
+            outStream.writeByte(LanTransport.OP_FILE_END.toInt())
+            outStream.writeUTF("item-ecdh")
+
+            // Complete
+            outStream.writeByte(LanTransport.OP_TRANSFER_COMPLETE.toInt())
+            outStream.flush()
+
+            socket.close()
+            true
+        }
+
+        withTimeout(8_000) {
+            val serverReceived = serverJob.await()
+            val clientDone = clientJob.await()
+            assertTrue(clientDone)
+            assertEquals(payload.size.toLong(), serverReceived)
+            val receivedSha256 = CryptoManager.computeSha256(targetFile.inputStream())
+            assertEquals(originalSha256, receivedSha256)
+        }
+    }
+
+    @Test
+    fun testEcdhWireKeyAgreementResistanceToPassiveEavesdropping() {
+        val aliceKeyPair = CryptoManager.generateEcKeyPair()
+        val alicePubBytes = CryptoManager.exportPublicKey(aliceKeyPair.public)
+
+        val bobKeyPair = CryptoManager.generateEcKeyPair()
+        val bobPubBytes = CryptoManager.exportPublicKey(bobKeyPair.public)
+
+        val aliceKey = CryptoManager.deriveSharedSecretEcdh(aliceKeyPair.private, bobPubBytes)
+        val bobKey = CryptoManager.deriveSharedSecretEcdh(bobKeyPair.private, alicePubBytes)
+
+        assertArrayEquals(aliceKey.encoded, bobKey.encoded)
+
+        val message = "Secret payload encrypted over Wi-Fi 7".toByteArray(Charsets.UTF_8)
+        val cipher = CryptoManager.encryptAesGcm(message, aliceKey)
+
+        // Passive eavesdropper only has alicePubBytes and bobPubBytes, but no private keys.
+        // A fake attacker key derived with another keypair fails decryption
+        val eveKeyPair = CryptoManager.generateEcKeyPair()
+        val eveFakeKey = CryptoManager.deriveSharedSecretEcdh(eveKeyPair.private, alicePubBytes)
+
+        var decryptionFailed = false
+        try {
+            CryptoManager.decryptAesGcm(cipher, eveFakeKey)
+        } catch (_: Exception) {
+            decryptionFailed = true
+        }
+        assertTrue("Eavesdropper without private key must fail decryption", decryptionFailed)
+    }
 }
 

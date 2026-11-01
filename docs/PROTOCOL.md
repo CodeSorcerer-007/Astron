@@ -24,7 +24,7 @@ When `h_ssid` and `h_pass` are present, the initiating device recognizes that th
 
 ---
 
-### 1.2 Handshake & Session Authentication
+### 1.2 Handshake & Ephemeral ECDH Key Agreement (Perfect Forward Secrecy)
 All multi-byte integers are encoded in **Big-Endian (Network Byte Order)**.
 
 ```
@@ -32,15 +32,25 @@ Client (Sender)                               Server (Receiver)
        |                                              |
        | ------------ TCP Connect (Port 52737) ------> |
        |                                              |
-       | ------------ [Magic: 0x41535452] ----------> |  ("ASTR" = 0x41535452)
-       | ------------ [Opcode: 0x01 (HANDSHAKE)] ---> |
-       | ------------ [Session ID UTF-8] -----------> |
-       | ------------ [Sender Name UTF-8] ----------> |
-       | ------------ [Session Token UTF-8] --------> |
+       | ------------ [Opcode: 0x11 (HANDSHAKE_ECDH_REQ)] -> |
+       | ------------ [Session ID UTF-8] ------------> |
+       | ------------ [Sender Name UTF-8] -----------> |
+       | ------------ [Sender PubKey Len (Int32 BE)]-> |
+       | ------------ [Sender NIST P-256 PubKey DER] > |
+       |                                              |  Derives Shared Secret:
+       |                                              |  HKDF-SHA256(ECDH, Salt=SessionId)
+       | <----------- [Opcode: 0x12 (HANDSHAKE_ECDH_RESP)] |
+       | <----------- [Receiver PubKey Len (Int32 BE)]|
+       | <----------- [Receiver NIST P-256 PubKey DER]|
        |                                              |
-       | <----------- [Opcode: 0x02 (HANDSHAKE_RESP)] |  (Receiver validates or prompts)
+Derives Shared Secret:                                |
+HKDF-SHA256(ECDH, Salt=SessionId)                     |
+       |                                              |
+       | === Authenticated AES-256-GCM Session Established ===
        |                                              |
 ```
+
+*(Note: Legacy `0x01 HANDSHAKE_REQ` and `0x02 HANDSHAKE_RESP` are retained for backward-compatible fallback).*
 
 ### 1.3 Multi-Stream Parallel Socket Acceleration
 When `TransferPriority.MAX_SPEED` is configured and multiple files are queued:

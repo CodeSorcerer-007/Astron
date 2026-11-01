@@ -8,14 +8,17 @@ This report documents the verification and test validation results for **Astron 
 
 - **Test Framework**: JUnit 4 / Kotlin Coroutines Test
 - **Execution Target**: JVM Unit & Integration Tests (`.\gradlew.bat testDebugUnitTest`)
-- **Total Test Suites**: 25
-- **Total Tests**: 145
-- **Passed**: 145 (100%)
+- **Total Test Suites**: 26
+- **Total Tests**: 150
+- **Passed**: 150 (100%)
 - **Failed**: 0 (0%)
 - **Regressions**: 0
 
 ```
 > Task :app:testDebugUnitTest
+[PASSED] com.astron.app.LanTransportIntegrationTest > testSocketLoopbackTransferWithEcdhHandshakeAndSha256
+[PASSED] com.astron.app.LanTransportIntegrationTest > testEcdhWireKeyAgreementResistanceToPassiveEavesdropping
+[PASSED] com.astron.app.TransportRegistryTest > testTransportRegistryEncapsulation
 [PASSED] com.astron.app.EcdhSecurityTest > testEcdhKeyPairGenerationAndExportImport
 [PASSED] com.astron.app.EcdhSecurityTest > testEcdhSharedSecretKeyAgreementRoundtrip
 [PASSED] com.astron.app.EcdhSecurityTest > testConstantTimeEqualsByteArray
@@ -46,7 +49,7 @@ This report documents the verification and test validation results for **Astron 
 [PASSED] com.astron.app.WebDropSecurityTest > testWebDropSessionTokenEntropy
 [PASSED] com.astron.app.WebDropSecurityTest > testStreamingAesGcmDecryption
 [PASSED] com.astron.app.AstronCoreTests > testRelayControlMessageProtocolSerialization
-... (145 tests in total across 25 suites)
+... (150 tests in total across 26 suites)
 ```
 
 ---
@@ -68,6 +71,9 @@ This report documents the verification and test validation results for **Astron 
 | `SEC-010` | **Strict TLS & Scoped Cleartext** | `<base-config cleartextTrafficPermitted="false">` in `network_security_config.xml` | **PASSED** — all external network calls strictly encrypted; cleartext restricted to localhost |
 | `SEC-011` | **Android 14+ Broadcast Export Safety** | Registering system-dispatched receivers with `ContextCompat.RECEIVER_EXPORTED` | **PASSED** — Bluetooth, Wi-Fi Direct & USB receivers safe on Android 14+ (API 34) |
 | `SEC-012` | **Web Drop Constant-RAM Streaming** | Decrypting multi-megabyte payloads via `CipherInputStream` with 64KB buffer | **PASSED** — eliminates JVM heap OOM risk; bounded to 64KB RAM |
+| `SEC-013` | **Wire ECDH Perfect Forward Secrecy** | Socket loopback negotiation over `OP_HANDSHAKE_ECDH_REQ` / `RESP` | **PASSED** — ephemeral P-256 agreement verified end-to-end |
+| `SEC-014` | **Passive Wire Eavesdropping Immunity** | Decryption attempt with public wire transcripts by adversary | **PASSED** — 100% rejection, forward secrecy guaranteed |
+| `ARCH-001` | **TransportRegistry Lifecycle & Decoupling** | Consolidated registry managing 12+ engines with single `closeAll()` | **PASSED** — clean encapsulation verified |
 | `UX-001`  | **Foreground DataSync Transparency** | Notification subText explaining background socket maintenance | **PASSED** — fully compliant with Google Play API 34+ policy |
 | `UX-002`  | **Web Drop Web Audio Synthesis** | Browser-side Web Audio API tone chimes and toast alerts | **PASSED** — zero-asset browser audio and completion feedback |
 | `I18N-001`| **Full String Extraction (i18n)** | Centralized 60+ UI keys in `strings.xml` | **PASSED** — ready for global translation |

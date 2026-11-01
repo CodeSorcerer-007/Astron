@@ -90,6 +90,8 @@ class LanTransport(
         const val OP_CANCEL: Byte = 0x08
         const val OP_FILE_RESUME: Byte = 0x09
         const val OP_MANIFEST_ACK: Byte = 0x0A
+        const val OP_HANDSHAKE_ECDH_REQ: Byte = 0x11
+        const val OP_HANDSHAKE_ECDH_RESP: Byte = 0x12
 
         const val MAX_ALLOWED_CHUNK_SIZE = 1024 * 1024 // 1 MB sanity limit
     }
@@ -294,19 +296,45 @@ class LanTransport(
             val outStream = DataOutputStream(BufferedOutputStream(primarySocket.getOutputStream(), chunkSize))
             val inStream = DataInputStream(BufferedInputStream(primarySocket.getInputStream()))
 
-            // 1. Handshake with session token for wire encryption and RTT measurement
+            // 1. Handshake with Ephemeral ECDH (NIST P-256) for Perfect Forward Secrecy (PFS)
+            val senderEcKeyPair = CryptoManager.generateEcKeyPair()
+            val senderPubKeyBytes = CryptoManager.exportPublicKey(senderEcKeyPair.public)
+
             val handshakeStartNs = System.nanoTime()
-            outStream.writeByte(OP_HANDSHAKE_REQ.toInt())
+            outStream.writeByte(OP_HANDSHAKE_ECDH_REQ.toInt())
             outStream.writeUTF(manifest.sessionId)
             outStream.writeUTF(manifest.senderDeviceName)
-            outStream.writeUTF(sessionToken)
+            outStream.writeInt(senderPubKeyBytes.size)
+            outStream.write(senderPubKeyBytes)
             outStream.flush()
 
             val respOp = inStream.readByte()
             val rttMs = ((System.nanoTime() - handshakeStartNs) / 1_000_000L).coerceAtLeast(1L)
-            if (respOp != OP_HANDSHAKE_RESP) {
-                Log.e(TAG, "Invalid handshake response from receiver")
-                return@withContext false
+
+            val sessionKey: SecretKey = when (respOp) {
+                OP_HANDSHAKE_ECDH_RESP -> {
+                    val peerKeyLen = inStream.readInt()
+                    if (peerKeyLen <= 0 || peerKeyLen > 2048) {
+                        Log.e(TAG, "Invalid peer public key length: $peerKeyLen")
+                        return@withContext false
+                    }
+                    val peerPubKeyBytes = ByteArray(peerKeyLen)
+                    inStream.readFully(peerPubKeyBytes)
+                    CryptoManager.deriveSharedSecretEcdh(
+                        privateKey = senderEcKeyPair.private,
+                        peerPublicKeyBytes = peerPubKeyBytes,
+                        salt = manifest.sessionId.toByteArray(Charsets.UTF_8),
+                        info = "Astron-ECDH-Session-${manifest.sessionId}"
+                    )
+                }
+                OP_HANDSHAKE_RESP -> {
+                    // Backward compatibility fallback for legacy nodes
+                    CryptoManager.deriveKeyFromToken(sessionToken)
+                }
+                else -> {
+                    Log.e(TAG, "Invalid handshake response from receiver (op=$respOp)")
+                    return@withContext false
+                }
             }
 
             // Dynamically scale chunk buffer size based on real-time RTT
@@ -376,15 +404,35 @@ class LanTransport(
                                     val workerOut = DataOutputStream(BufferedOutputStream(workerSocket.getOutputStream(), chunkSize))
                                     val workerIn = DataInputStream(BufferedInputStream(workerSocket.getInputStream()))
 
-                                    // Handshake worker
-                                    workerOut.writeByte(OP_HANDSHAKE_REQ.toInt())
+                                    // Handshake worker with ECDH
+                                    val workerKeyPair = CryptoManager.generateEcKeyPair()
+                                    val workerPubKeyBytes = CryptoManager.exportPublicKey(workerKeyPair.public)
+
+                                    workerOut.writeByte(OP_HANDSHAKE_ECDH_REQ.toInt())
                                     workerOut.writeUTF(manifest.sessionId)
                                     workerOut.writeUTF(manifest.senderDeviceName)
-                                    workerOut.writeUTF(sessionToken)
+                                    workerOut.writeInt(workerPubKeyBytes.size)
+                                    workerOut.write(workerPubKeyBytes)
                                     workerOut.flush()
 
                                     val wResp = workerIn.readByte()
-                                    if (wResp == OP_HANDSHAKE_RESP) {
+                                    val workerSessionKey = when (wResp) {
+                                        OP_HANDSHAKE_ECDH_RESP -> {
+                                            val wPeerKeyLen = workerIn.readInt()
+                                            val wPeerKeyBytes = ByteArray(wPeerKeyLen)
+                                            workerIn.readFully(wPeerKeyBytes)
+                                            CryptoManager.deriveSharedSecretEcdh(
+                                                privateKey = workerKeyPair.private,
+                                                peerPublicKeyBytes = wPeerKeyBytes,
+                                                salt = manifest.sessionId.toByteArray(Charsets.UTF_8),
+                                                info = "Astron-ECDH-Session-${manifest.sessionId}"
+                                            )
+                                        }
+                                        OP_HANDSHAKE_RESP -> sessionKey
+                                        else -> null
+                                    }
+
+                                    if (workerSessionKey != null) {
                                         workerOut.writeByte(OP_MANIFEST.toInt())
                                         workerOut.writeInt(manifestBytes.size)
                                         workerOut.write(manifestBytes)
@@ -395,7 +443,7 @@ class LanTransport(
                                             sendStreamItems(
                                                 outStream = workerOut,
                                                 itemQueue = itemQueue,
-                                                sessionKey = sessionKey,
+                                                sessionKey = workerSessionKey,
                                                 chunkSize = dynamicChunkSize,
                                                 manifest = manifest,
                                                 priority = priority,
@@ -624,19 +672,50 @@ class LanTransport(
             val inStream = DataInputStream(BufferedInputStream(socket.getInputStream(), chunkSize))
             val outStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
 
-            // 1. Handshake with session token
+            // 1. Handshake with ECDH (or legacy token fallback)
             val handshakeOp = inStream.readByte()
-            if (handshakeOp != OP_HANDSHAKE_REQ) {
-                socket.close()
-                return@withContext
-            }
-            val sessionId = inStream.readUTF()
-            val senderName = inStream.readUTF()
-            val sessionToken = inStream.readUTF()
-            val sessionKey = CryptoManager.deriveKeyFromToken(sessionToken)
+            val (sessionId, senderName, sessionKey) = when (handshakeOp) {
+                OP_HANDSHAKE_ECDH_REQ -> {
+                    val sId = inStream.readUTF()
+                    val sName = inStream.readUTF()
+                    val peerKeyLen = inStream.readInt()
+                    if (peerKeyLen <= 0 || peerKeyLen > 2048) {
+                        socket.close()
+                        return@withContext
+                    }
+                    val peerPubKeyBytes = ByteArray(peerKeyLen)
+                    inStream.readFully(peerPubKeyBytes)
 
-            outStream.writeByte(OP_HANDSHAKE_RESP.toInt())
-            outStream.flush()
+                    val receiverKeyPair = CryptoManager.generateEcKeyPair()
+                    val receiverPubKeyBytes = CryptoManager.exportPublicKey(receiverKeyPair.public)
+                    val key = CryptoManager.deriveSharedSecretEcdh(
+                        privateKey = receiverKeyPair.private,
+                        peerPublicKeyBytes = peerPubKeyBytes,
+                        salt = sId.toByteArray(Charsets.UTF_8),
+                        info = "Astron-ECDH-Session-$sId"
+                    )
+
+                    outStream.writeByte(OP_HANDSHAKE_ECDH_RESP.toInt())
+                    outStream.writeInt(receiverPubKeyBytes.size)
+                    outStream.write(receiverPubKeyBytes)
+                    outStream.flush()
+                    Triple(sId, sName, key)
+                }
+                OP_HANDSHAKE_REQ -> {
+                    val sId = inStream.readUTF()
+                    val sName = inStream.readUTF()
+                    val sToken = inStream.readUTF()
+                    val key = CryptoManager.deriveKeyFromToken(sToken)
+
+                    outStream.writeByte(OP_HANDSHAKE_RESP.toInt())
+                    outStream.flush()
+                    Triple(sId, sName, key)
+                }
+                else -> {
+                    socket.close()
+                    return@withContext
+                }
+            }
 
             // 2. Read Manifest
             val manifestOp = inStream.readByte()
